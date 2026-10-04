@@ -1,0 +1,172 @@
+"""uvvis_i18n.py - Übersetzungen DE/EN. T(key, **kw) liefert den Text in der aktiven Sprache."""
+from __future__ import annotations
+
+import os
+
+_LANG = os.environ.get("UVVIS_LANG", "de")[:2].lower()
+
+TEXTS = {
+    # ---- Kern / Log ------------------------------------------------------
+    "no_conc_in_name": ("WARNUNG: keine Konzentration in Probenname '{name}' – übersprungen",
+                        "WARNING: no concentration in sample name '{name}' – skipped"),
+    "no_baseline_window": ("WARNUNG: kein Basislinienfenster gefunden – keine Korrektur",
+                           "WARNING: no baseline window found – no correction"),
+    "baseline_window": ("Basislinie: Fenster {a:.0f}–{b:.0f} nm, Offsets {offs}",
+                        "Baseline: window {a:.0f}–{b:.0f} nm, offsets {offs}"),
+    "baseline_kept": ("Basislinie: im Fenster absorbiert die Probe noch ({k:.4f} pro {u}) – "
+                      "dieser Anteil bleibt erhalten",
+                      "Baseline: sample still absorbs in the window ({k:.4f} per {u}) – "
+                      "this part is kept"),
+    "r2_hidden": ("{lam:g} nm: R² = {r2:.3f} < {min:g} – nicht im Bild",
+                  "{lam:g} nm: R² = {r2:.3f} < {min:g} – not shown in figure"),
+    "hdr_intercept": ("Achsenabschn.", "intercept"),
+    "no_fit": ("kein Fit: nur {n} Punkte unter A = {cut:g} (min. {min})",
+               "no fit: only {n} points below A = {cut:g} (min. {min})"),
+    "few_points": ("nur {n} Punkte im Fit", "only {n} points in fit"),
+    "intercept_sig": ("Achsenabschnitt {b:.3g} ± {e:.2g} signifikant ≠ 0 (Basislinie/Nichtlinearität?)",
+                      "intercept {b:.3g} ± {e:.2g} significantly ≠ 0 (baseline/non-linearity?)"),
+    "inset_shrunk": ("Hinweis: Inset auf {f:.0%}{tab}, um Platz zu finden",
+                     "Note: inset scaled to {f:.0%}{tab} to find space"),
+    "without_table": (" ohne Tabelle", " without table"),
+    "image_shrunk": ("Hinweis: '{key}' auf {f:.0%} verkleinert, um Platz zu finden",
+                     "Note: '{key}' scaled to {f:.0%} to find space"),
+    "no_space": ("WARNUNG: kein freier Platz für '{key}' – liegt über Spektren, bitte verschieben",
+                 "WARNING: no free space for '{key}' – overlaps spectra, please move it"),
+    "overlap": ("WARNUNG: Überlappung {pair} – bitte verschieben",
+                "WARNING: overlap {pair} – please move"),
+    "saved": ("gespeichert: {p}", "saved: {p}"),
+    "series_head": ("=== {tag}: {n} Spektren, d = {d:g} cm, c in {u} ===",
+                    "=== {tag}: {n} spectra, d = {d:g} cm, c in {u} ==="),
+    "no_mw": ("WARNUNG: keine Molmasse -> Ausgabe als spezifischer Absorptionskoeffizient "
+              "a [L g⁻¹ cm⁻¹], NICHT ε",
+              "WARNING: no molar mass -> reported as specific absorption coefficient "
+              "a [L g⁻¹ cm⁻¹], NOT ε"),
+    "peaks_found": ("automatisch gefundene Banden: {l} nm", "automatically found bands: {l} nm"),
+    "cary_series": ("Cary-Datei {name}: Serien {s}", "Cary file {name}: series {s}"),
+    "mixed_units": ("Serie {g}: gemischte Einheiten {u}", "series {g}: mixed units {u}"),
+    "bg_none": ("WARNUNG: keine Freistellungsmethode verfügbar – Hintergrund bleibt",
+                "WARNING: no background removal method available – background kept"),
+    "bg_implausible": ("Freistellung mit {m} unplausibel ({f:.0%} Objektfläche), nächste Methode",
+                       "background removal with {m} implausible ({f:.0%} object area), trying next"),
+    "bg_failed": ("Freistellung mit {m} fehlgeschlagen: {e}", "background removal with {m} failed: {e}"),
+    "bg_giveup": ("WARNUNG: Hintergrund konnte nicht entfernt werden ({e})",
+                  "WARNING: background could not be removed ({e})"),
+    "need_rdkit": ("CDXML braucht RDKit (pip install rdkit)", "CDXML requires RDKit (pip install rdkit)"),
+    "cdxml_unsanitized": ("Struktur chemisch nicht vollständig interpretierbar – Molmasse nicht berechnet",
+                          "structure could not be fully interpreted – molar mass not computed"),
+    "cdxml_empty": ("{name}: keine Struktur in CDXML gefunden", "{name}: no structure found in CDXML"),
+    "cdxml_fragments": ("{n} Fragmente – Molmasse ist die Summe (Salz/Gegenion?)",
+                        "{n} fragments – molar mass is the sum (salt/counter-ion?)"),
+    "cdxml_dummies": ("{n} Platzhalteratom(e) (Abkürzung wie Dipp/Mes nicht aufgelöst?) – "
+                      "Molmasse bitte manuell eingeben",
+                      "{n} placeholder atom(s) (abbreviation like Dipp/Mes not expanded?) – "
+                      "please enter molar mass manually"),
+    "cdx_binary": ("Binäres .cdx wird nicht gelesen – in ChemDraw als .cdxml oder .svg speichern",
+                   "binary .cdx is not supported – save as .cdxml or .svg in ChemDraw"),
+    "need_pymupdf": ("SVG/PDF/CDXML brauchen PyMuPDF", "SVG/PDF/CDXML require PyMuPDF"),
+    "need_heif": ("{name}: für HEIC/HEIF wird pillow-heif benötigt", "{name}: HEIC/HEIF requires pillow-heif"),
+    "bad_image": ("{name}: Bildformat nicht lesbar ({e})", "{name}: image format not readable ({e})"),
+    "model_missing": ("ISNet-Modell nicht vorhanden", "ISNet model not available"),
+    "download_cancelled": ("Download abgebrochen", "download cancelled"),
+
+    # ---- GUI -------------------------------------------------------------
+    "app_title": ("UV-Vis-Auswertung", "UV-Vis Analysis"),
+    "menu_file": ("&Datei", "&File"),
+    "menu_lang": ("&Sprache", "&Language"),
+    "menu_help": ("&Hilfe", "&Help"),
+    "act_open": ("CSV öffnen…", "Open CSV…"),
+    "act_export": ("Exportieren…", "Export…"),
+    "act_quit": ("Beenden", "Quit"),
+    "act_about": ("Über", "About"),
+    "lang_restart": ("Die Sprache wird sofort umgestellt.", "Language switched."),
+    "grp_data": ("Daten", "Data"),
+    "no_file": ("keine Datei geladen", "no file loaded"),
+    "series": ("Serie", "Series"),
+    "grp_compound": ("Verbindung", "Compound"),
+    "structure": ("Struktur", "Structure"),
+    "photo": ("Küvettenfoto", "Cuvette photo"),
+    "choose": ("Wählen…", "Choose…"),
+    "remove": ("Entfernen", "Remove"),
+    "molar_mass": ("Molmasse [g/mol]", "Molar mass [g/mol]"),
+    "mw_from_cdxml": ("aus CDXML", "from CDXML"),
+    "mw_hint_none": ("leer = spezifischer Koeffizient a statt ε", "empty = specific coefficient a instead of ε"),
+    "bg_method": ("Freistellung", "Background"),
+    "bg_auto": ("automatisch", "automatic"),
+    "bg_isnet": ("KI (ISNet)", "AI (ISNet)"),
+    "bg_grabcut": ("GrabCut", "GrabCut"),
+    "bg_border": ("Randfarbe", "Border colour"),
+    "bg_off": ("keine", "none"),
+    "grp_eval": ("Auswertung", "Analysis"),
+    "path_length": ("Schichtdicke [cm]", "Path length [cm]"),
+    "cutoff": ("Fit-Cutoff A", "Fit cutoff A"),
+    "min_points": ("min. Punkte", "min. points"),
+    "wavelengths": ("Banden [nm]", "Bands [nm]"),
+    "wavelengths_ph": ("leer = automatisch, z. B. 484, 732", "empty = automatic, e.g. 484, 732"),
+    "baseline": ("Basislinie", "Baseline"),
+    "bl_series": ("automatisch (Reihe)", "automatic (series)"),
+    "bl_simple": ("automatisch (einfach)", "automatic (simple)"),
+    "bl_manual": ("manuelles Fenster", "manual window"),
+    "bl_off": ("aus", "off"),
+    "grp_plot": ("Darstellung", "Plot"),
+    "ymax": ("y-Achse max", "y-axis max"),
+    "r2_mode": ("R² anzeigen", "Show R²"),
+    "r2_legend": ("in Inset-Legende", "in inset legend"),
+    "r2_label": ("im Bandenlabel", "in band label"),
+    "r2_off": ("aus", "off"),
+    "show_err": ("ε mit Fehler", "ε with error"),
+    "inset_table": ("Tabelle im Inset", "table in inset"),
+    "btn_update": ("Aktualisieren", "Update"),
+    "btn_reset_layout": ("Layout zurücksetzen", "Reset layout"),
+    "btn_export": ("Exportieren…", "Export…"),
+    "drag_hint": ("Inset, Bilder und Labels lassen sich mit der Maus verschieben. CSV, Struktur "
+                  "und Foto können auch einfach ins Fenster gezogen werden.",
+                  "Inset, images and labels can be dragged with the mouse. CSV, structure and "
+                  "photo can also be dropped onto the window."),
+    "tab_results": ("Ergebnisse", "Results"),
+    "tab_log": ("Protokoll", "Log"),
+    "col_lam": ("λ [nm]", "λ [nm]"),
+    "col_n": ("n", "n"),
+    "col_coeff": ("ε / a", "ε / a"),
+    "col_intercept": ("Achsenabschnitt", "Intercept"),
+    "col_r2": ("R²", "R²"),
+    "col_warn": ("Hinweise", "Notes"),
+    "dlg_open_csv": ("UV-Vis-Daten öffnen", "Open UV-Vis data"),
+    "dlg_structure": ("Struktur wählen", "Choose structure"),
+    "dlg_photo": ("Küvettenfoto wählen", "Choose cuvette photo"),
+    "dlg_export": ("Export-Ordner wählen", "Choose export folder"),
+    "flt_csv": ("Cary-CSV / Text (*.csv *.txt)", "Cary CSV / text (*.csv *.txt)"),
+    "flt_struct": ("Strukturen (*.cdxml *.svg *.pdf *.png *.jpg *.jpeg *.tif *.tiff)",
+                   "Structures (*.cdxml *.svg *.pdf *.png *.jpg *.jpeg *.tif *.tiff)"),
+    "flt_photo": ("Bilder (*.heic *.heif *.jpg *.jpeg *.png *.tif *.tiff *.webp *.bmp *.avif)",
+                  "Images (*.heic *.heif *.jpg *.jpeg *.png *.tif *.tiff *.webp *.bmp *.avif)"),
+    "flt_all": ("Alle Dateien (*)", "All files (*)"),
+    "model_q_title": ("KI-Freistellung", "AI background removal"),
+    "model_q": ("Für die beste Freistellung wird einmalig ein Modell (~{mb} MB) heruntergeladen.\n"
+                "Jetzt laden? (Nein = einfachere Methode GrabCut)",
+                "The best background removal needs a one-time model download (~{mb} MB).\n"
+                "Download now? (No = simpler GrabCut method)"),
+    "downloading": ("Modell wird geladen…", "Downloading model…"),
+    "cancel": ("Abbrechen", "Cancel"),
+    "working": ("Rechne…", "Working…"),
+    "err_title": ("Fehler", "Error"),
+    "exported_to": ("Exportiert nach:\n{p}", "Exported to:\n{p}"),
+    "mw_formula": ("{f}, M = {mw:.2f} g/mol", "{f}, M = {mw:.2f} g/mol"),
+    "about": ("UV-Vis-Auswertung {v}\nLambert-Beer-Auswertung von Verdünnungsreihen.",
+              "UV-Vis Analysis {v}\nBeer–Lambert analysis of dilution series."),
+    "load_first": ("Bitte zuerst eine CSV öffnen.", "Please open a CSV first."),
+}
+
+
+def set_lang(lang: str):
+    global _LANG
+    _LANG = "en" if str(lang).lower().startswith("en") else "de"
+
+
+def get_lang() -> str:
+    return _LANG
+
+
+def T(key: str, **kw) -> str:
+    de, en = TEXTS.get(key, (key, key))
+    txt = en if _LANG == "en" else de
+    return txt.format(**kw) if kw else txt

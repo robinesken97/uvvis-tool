@@ -1,0 +1,10 @@
+numpy
+matplotlib
+pyyaml
+pillow
+PySide6
+pymupdf
+rdkit
+pillow-heif
+onnxruntime
+opencv-python-headless
