@@ -122,7 +122,7 @@ Nach jedem Build läuft auf jedem System ein Selbsttest der fertigen App.
 **Neue Version über die Weboberfläche:**
 
 1. Geänderte Dateien hochladen: „Add file“ → „Upload files“ → „Commit changes“.
-2. **Releases** → „Create a new release“ → bei „Choose a tag“ z. B. `v1.2.0` eintippen → „Create new tag“ → „Publish release“.
+2. **Releases** → „Create a new release“ → bei „Choose a tag“ z. B. `v1.0.0` eintippen → „Create new tag“ → „Publish release“.
 3. Nach etwa 20–40 Minuten hängen die drei App-Dateien am Release.
 
 **Testbuild ohne Release:** Actions → „Build UVVisTool“ → „Run workflow“. Das Ergebnis liegt unten
