@@ -195,23 +195,56 @@ def parse_sample_name(name):
     return group, conc, unit
 
 
-def load_cary(path):
-    """Cary-Export: Zeile 1 = Probennamen (je 2 Spalten), danach λ/Abs-Paare."""
+def read_cary_samples(path):
+    """Cary-Export: Zeile 1 = Probennamen (je 2 Spalten), danach λ/Abs-Paare.
+    -> Liste von dict(key, name, x, y, parsed=(serie, c, einheit) | None)."""
     first = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()[0]
     names = [n.strip() for n in first.split(",")[0::2]]
     arr = read_table(path)
-    groups = {}
+    samples, seen = [], {}
     for k, name in enumerate(names):
-        if not name or 2 * k + 1 >= arr.shape[1]:
+        if 2 * k + 1 >= arr.shape[1]:
             continue
-        parsed = parse_sample_name(name)
-        if not parsed:
-            log("  " + T("no_conc_in_name", name=name))
-            continue
-        g, c, unit = parsed
+        name = name or f"#{k + 1}"
+        seen[name] = seen.get(name, 0) + 1
+        key = name if seen[name] == 1 else f"{name} ({seen[name]})"   # doppelte Namen
         x, y = _clean_xy(arr[:, 2 * k], arr[:, 2 * k + 1])
-        groups.setdefault(g, []).append({"x": x, "y": y, "c": c, "unit": unit, "name": name,
-                                         "color": None})
+        if len(x) < 5:
+            continue
+        samples.append({"key": key, "name": name, "x": x, "y": y, "parsed": parse_sample_name(name)})
+    return samples
+
+
+def group_samples(samples, overrides=None, default_series="serie"):
+    """Proben zu Serien. overrides: {key: {conc, unit, series}} hat Vorrang vor dem Namen.
+    Proben ohne Konzentration werden ausgelassen. -> (groups, units, missing_keys)"""
+    overrides = overrides or {}
+    groups, missing = {}, []
+    for s_ in samples:
+        o = overrides.get(s_["key"]) or {}
+        if o.get("conc"):
+            g, c, u = o.get("series") or default_series, float(o["conc"]), o.get("unit", "mM")
+        elif s_["parsed"] and not o.get("skip"):
+            g, c, u = s_["parsed"]
+        else:
+            if not o.get("skip"):
+                missing.append(s_["key"])
+            continue
+        groups.setdefault(g, []).append({"x": s_["x"], "y": s_["y"], "c": c, "unit": u,
+                                         "name": s_["key"], "color": None})
+    units = {}
+    for g, sp in groups.items():
+        us = {s_["unit"] for s_ in sp}
+        if len(us) > 1:
+            raise ValueError(T("mixed_units", g=g, u=us))
+        units[g] = us.pop()
+    return groups, units, missing
+
+
+def load_cary(path):
+    groups, _, missing = group_samples(read_cary_samples(path), default_series=Path(path).stem)
+    for k in missing:
+        log("  " + T("no_conc_in_name", name=k))
     return groups
 
 
@@ -1012,17 +1045,11 @@ def make_demo(d: Path):
 # ----------------------------------------------------------------------------
 # API für GUI und Kommandozeile
 # ----------------------------------------------------------------------------
-def load_series(path):
-    """Datei -> {serienname: [spektren]} und Konzentrationseinheit je Serie."""
-    groups = load_cary(path)
-    log(T("cary_series", name=Path(path).name, s=", ".join(groups)))
-    units = {}
-    for g, sp in groups.items():
-        u = {s_["unit"] for s_ in sp}
-        if len(u) > 1:
-            raise ValueError(T("mixed_units", g=g, u=u))
-        units[g] = u.pop()
-    return groups, units
+def load_series(path, overrides=None):
+    """Datei -> ({serie: [spektren]}, {serie: einheit}, [proben ohne Konzentration])."""
+    groups, units, missing = group_samples(read_cary_samples(path), overrides, Path(path).stem)
+    log(T("cary_series", name=Path(path).name, s=", ".join(groups) or "–"))
+    return groups, units, missing
 
 
 def prepare_series(cfg, spectra, tag=""):
@@ -1099,7 +1126,9 @@ def main():
     if base["cary_file"]:
         cf = Path(base["cary_file"])
         cf = cf if cf.is_absolute() else cpath.parent / cf
-        groups, units = load_series(cf)
+        groups, units, missing = load_series(cf, user.get("concentrations"))
+        for k in missing:
+            log("  " + T("no_conc_in_name", name=k))
         for g, sp in groups.items():
             if base["select"] and g not in base["select"]:
                 continue

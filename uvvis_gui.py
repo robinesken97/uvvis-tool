@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -28,8 +28,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
 from matplotlib.figure import Figure as MplFigure  # noqa: E402
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal  # noqa: E402
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QImage, QPixmap  # noqa: E402
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,  # noqa: E402
-                               QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,  # noqa: E402
+                               QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
                                QPlainTextEdit, QProgressDialog, QPushButton, QScrollArea,
                                QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
@@ -95,6 +95,94 @@ class GuiDragger(core.Dragger):
         pass
 
 
+UNITS = [("mM", "mM"), ("uM", "µM"), ("mg/mL", "mg/mL"), ("M", "M")]
+
+
+class ConcDialog(QDialog):
+    """Konzentrationen je Probe eintragen (wenn sie nicht im Probennamen stehen)."""
+
+    def __init__(self, parent, samples, overrides, default_series):
+        super().__init__(parent)
+        self.setWindowTitle(T("conc_title"))
+        self.samples = samples
+        lay = QVBoxLayout(self)
+        intro = QLabel(T("conc_intro"))
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+
+        unit0 = None
+        for s_ in samples:
+            o = overrides.get(s_["key"]) or {}
+            unit0 = unit0 or o.get("unit") or (s_["parsed"][2] if s_["parsed"] else None)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(T("unit")))
+        self.cmb_unit = QComboBox()
+        for key, label in UNITS:
+            self.cmb_unit.addItem(label, key)
+        self.cmb_unit.setCurrentIndex(max(0, self.cmb_unit.findData(unit0 or "mM")))
+        row.addWidget(self.cmb_unit)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        self.table = QTableWidget(len(samples), 3)
+        self.table.setHorizontalHeaderLabels([T("col_sample"), T("col_series"), T("col_conc")])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        for i, s_ in enumerate(samples):
+            o = overrides.get(s_["key"]) or {}
+            it = QTableWidgetItem(s_["key"])
+            it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(i, 0, it)
+            series = o.get("series") or (s_["parsed"][0] if s_["parsed"] else default_series)
+            self.table.setItem(i, 1, QTableWidgetItem(series))
+            c = o.get("conc") or (s_["parsed"][1] if s_["parsed"] and not o.get("skip") else None)
+            self.table.setItem(i, 2, QTableWidgetItem(f"{c:g}" if c else ""))
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.resizeColumnsToContents()
+        lay.addWidget(self.table)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel(T("dil_start")))
+        self.sp_start = QDoubleSpinBox(decimals=4, minimum=0.0, maximum=1e6, value=1.0)
+        row.addWidget(self.sp_start)
+        row.addWidget(QLabel(T("dil_factor")))
+        self.sp_fac = QDoubleSpinBox(decimals=3, minimum=1.0, maximum=1000, value=2.0)
+        row.addWidget(self.sp_fac)
+        b = QPushButton(T("dil_fill"))
+        b.clicked.connect(self.fill_dilution)
+        row.addWidget(b)
+        row.addStretch(1)
+        lay.addLayout(row)
+        hint = QLabel(T("dil_hint"))
+        hint.setStyleSheet("color: gray;")
+        lay.addWidget(hint)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        self.table.setMinimumHeight(36 + 30 * min(len(samples), 12))
+        self.resize(600, 300 + 30 * min(len(samples), 12))
+
+    def fill_dilution(self):
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}) or list(range(self.table.rowCount()))
+        c = self.sp_start.value()
+        for r in rows:
+            self.table.item(r, 2).setText(f"{c:.6g}")
+            c /= self.sp_fac.value()
+
+    def overrides(self):
+        unit = self.cmb_unit.currentData()
+        out = {}
+        for i, s_ in enumerate(self.samples):
+            series = (self.table.item(i, 1).text() or "").strip()
+            try:
+                c = parse_float(self.table.item(i, 2).text())
+            except ValueError:
+                c = None
+            out[s_["key"]] = {"conc": c, "unit": unit, "series": series} if c else {"skip": True}
+        return out
+
+
 class MainWindow(QMainWindow):
     log_signal = Signal(str)
 
@@ -104,6 +192,7 @@ class MainWindow(QMainWindow):
         set_lang(self.settings.value("lang", "de"))
         self.csv_path = None
         self.groups, self.units = {}, {}
+        self.samples, self.conc = [], {}          # Rohproben und Konzentrations-Overrides
         self.series = {}               # je Serie: mw, structure, photo, bg, layout, assets
         self.current = None
         self.F = None
@@ -141,6 +230,7 @@ class MainWindow(QMainWindow):
         m = mb.addMenu(T("menu_file"))
         a = QAction(T("act_open"), self, shortcut="Ctrl+O", triggered=self.choose_csv)
         m.addAction(a)
+        m.addAction(QAction(T("act_conc"), self, triggered=self.edit_concentrations))
         m.addAction(QAction(T("act_export"), self, shortcut="Ctrl+E", triggered=self.export_dialog))
         m.addSeparator()
         m.addAction(QAction(T("act_quit"), self, shortcut="Ctrl+Q", triggered=self.close))
@@ -174,7 +264,12 @@ class MainWindow(QMainWindow):
         if self.current:
             self.cmb_series.setCurrentText(self.current)
         self.cmb_series.currentTextChanged.connect(self.series_changed)
-        f.addRow(T("series"), self.cmb_series)
+        row = QHBoxLayout()
+        row.addWidget(self.cmb_series, 1)
+        b = QPushButton(T("act_conc"))
+        b.clicked.connect(self.edit_concentrations)
+        row.addWidget(b)
+        f.addRow(T("series"), row)
         lv.addWidget(g)
 
         g = QGroupBox(T("grp_compound"))
@@ -374,32 +469,73 @@ class MainWindow(QMainWindow):
         if p:
             self.open_csv(p)
 
-    def open_csv(self, path):
+    def open_csv(self, path, ask=True):
         path = str(Path(path).resolve())
         try:
-            groups, units = core.load_series(path)
+            samples = core.read_cary_samples(path)
         except Exception as e:
             self.error(str(e))
-            return
-        if not groups:
-            self.error(T("no_conc_in_name", name=Path(path).name))
-            return
+            return False
         self.save_project()
-        self.csv_path, self.groups, self.units = path, groups, units
+        self.csv_path, self.samples = path, samples
         self.settings.setValue("last_dir", str(Path(path).parent))
-        self.series = {g: {"mw": None, "structure": None, "photo": None, "bg": "auto", "layout": {},
-                           "structure_asset": None, "photo_asset": None, "chem_info": "",
-                           "chem_warn": False} for g in groups}
-        self.load_project()
+        self.groups, self.units, self.series, self.conc = {}, {}, {}, {}
+        data = self.read_project()
+        self.conc = (data.get("concentrations") or {}) if data else {}
+        _, _, missing = core.group_samples(samples, self.conc, Path(path).stem)
+        if missing and ask and not self.edit_concentrations(rebuild=False):
+            pass
+        if not self.rebuild_groups():
+            self.lbl_file.setText(Path(path).name)
+            self.error(T("conc_none"))
+            return False
+        self.load_project(data)
         self.lbl_file.setText(Path(path).name)
-        self.current = next(iter(groups))
-        self.cmb_series.blockSignals(True)
-        self.cmb_series.clear()
-        self.cmb_series.addItems(list(groups))
-        self.cmb_series.blockSignals(False)
         self.apply_globals()
         self.apply_series_widgets()
         self.render()
+        return True
+
+    def edit_concentrations(self, rebuild=True):
+        if not self.samples:
+            self.error(T("load_first"))
+            return False
+        dlg = ConcDialog(self, self.samples, self.conc, Path(self.csv_path).stem)
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        self.conc = dlg.overrides()
+        if rebuild:
+            self.rebuild_groups()
+            self.apply_series_widgets()
+            self.render()
+            self.save_project()
+        return True
+
+    def rebuild_groups(self):
+        """Serien aus Proben + Konzentrationen neu bilden; Einstellungen je Serie bleiben."""
+        try:
+            groups, units, missing = core.group_samples(self.samples, self.conc, Path(self.csv_path).stem)
+        except ValueError as e:
+            self.error(str(e))
+            return False
+        for k in missing:
+            self.log_signal.emit("  " + T("no_conc_in_name", name=k))
+        self.groups, self.units = groups, units
+        for g in groups:
+            self.series.setdefault(g, {"mw": None, "structure": None, "photo": None, "bg": "auto",
+                                       "layout": {}, "structure_asset": None, "photo_asset": None,
+                                       "chem_info": "", "chem_warn": False})
+        if self.current not in groups:
+            self.current = next(iter(groups), None)
+        self.cmb_series.blockSignals(True)
+        self.cmb_series.clear()
+        self.cmb_series.addItems(list(groups))
+        if self.current:
+            self.cmb_series.setCurrentText(self.current)
+        self.cmb_series.blockSignals(False)
+        log_names = ", ".join(groups) or "–"
+        self.log_signal.emit(T("cary_series", name=Path(self.csv_path).name, s=log_names))
+        return bool(groups)
 
     def project_file(self):
         return Path(self.csv_path).with_suffix(".uvvis.yaml") if self.csv_path else None
@@ -410,6 +546,7 @@ class MainWindow(QMainWindow):
             return
         self.collect_globals()
         data = {"global": self.glob,
+                "concentrations": self.conc,
                 "series": {g: {k: st[k] for k in ("mw", "structure", "photo", "bg", "layout")}
                            for g, st in self.series.items()}}
         try:
@@ -417,13 +554,18 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
 
-    def load_project(self):
+    def read_project(self):
         pf = self.project_file()
         if not pf or not pf.exists():
-            return
+            return {}
         try:
-            data = yaml.safe_load(pf.read_text(encoding="utf-8")) or {}
+            return yaml.safe_load(pf.read_text(encoding="utf-8")) or {}
         except Exception:
+            return {}
+
+    def load_project(self, data=None):
+        data = data if data is not None else self.read_project()
+        if not data:
             return
         self.glob.update(data.get("global") or {})
         for g, sd in (data.get("series") or {}).items():
@@ -830,6 +972,21 @@ def selftest(outdir, with_isnet=False):
         page = pymupdf.open(str(out / "selftest_TEST-A.pdf"))[0]
         report.append(f"pdf: {len(page.get_drawings())} vector paths, {len(page.get_images())} images")
         assert page.get_images(), "photo missing in PDF"
+        # Probennamen ohne Konzentration (z. B. c0..c4) -> Overrides wie aus dem Dialog
+        txt = csv.read_text(encoding="utf-8").splitlines()
+        n_samples = len([n for n in txt[0].split(",") if n])
+        txt[0] = "".join(f"c{i},," for i in range(n_samples))
+        plain = out / "input" / "unnamed.csv"
+        plain.write_text("\r\n".join(txt), encoding="utf-8")
+        assert w.open_csv(plain, ask=False) is False                 # ohne Angaben: nichts
+        w.conc = {f"c{i}": {"conc": 1.0 / 2 ** i, "unit": "mg/mL", "series": "unbenannt"}
+                  for i in range(5)}
+        assert w.rebuild_groups() and "unbenannt" in w.groups, w.groups
+        assert len(w.groups["unbenannt"]) == 5
+        w.render()
+        w.save_project()
+        assert w.open_csv(plain, ask=False) and "unbenannt" in w.groups   # aus Projekt geladen
+        report.append("unnamed samples: OK")
         for lang in ("en", "de"):
             w.switch_lang(lang)
         report.append("OK")

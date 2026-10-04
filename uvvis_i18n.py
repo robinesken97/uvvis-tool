@@ -7,8 +7,8 @@ _LANG = os.environ.get("UVVIS_LANG", "de")[:2].lower()
 
 TEXTS = {
     # ---- Kern / Log ------------------------------------------------------
-    "no_conc_in_name": ("WARNUNG: keine Konzentration in Probenname '{name}' – übersprungen",
-                        "WARNING: no concentration in sample name '{name}' – skipped"),
+    "no_conc_in_name": ("Probe '{name}': keine Konzentration im Namen",
+                        "sample '{name}': no concentration in name"),
     "no_baseline_window": ("WARNUNG: kein Basislinienfenster gefunden – keine Korrektur",
                            "WARNING: no baseline window found – no correction"),
     "baseline_window": ("Basislinie: Fenster {a:.0f}–{b:.0f} nm, Offsets {offs}",
@@ -154,6 +154,25 @@ TEXTS = {
     "about": ("UV-Vis-Auswertung {v}\nLambert-Beer-Auswertung von Verdünnungsreihen.",
               "UV-Vis Analysis {v}\nBeer–Lambert analysis of dilution series."),
     "load_first": ("Bitte zuerst eine CSV öffnen.", "Please open a CSV first."),
+    "act_conc": ("Konzentrationen…", "Concentrations…"),
+    "conc_title": ("Konzentrationen eingeben", "Enter concentrations"),
+    "conc_intro": ("Die Probennamen enthalten keine (vollständigen) Konzentrationsangaben. "
+                   "Bitte Konzentrationen eintragen – Proben ohne Wert (z. B. Blindprobe) werden "
+                   "ignoriert. Die Angaben werden mit dem Projekt gespeichert.",
+                   "The sample names do not contain (complete) concentration information. "
+                   "Please enter concentrations – samples without a value (e.g. blank) are "
+                   "ignored. The values are saved with the project."),
+    "col_sample": ("Probe", "Sample"),
+    "col_series": ("Serie", "Series"),
+    "col_conc": ("Konzentration", "Concentration"),
+    "unit": ("Einheit", "Unit"),
+    "dil_start": ("Start", "Start"),
+    "dil_factor": ("Faktor", "Factor"),
+    "dil_fill": ("Verdünnungsreihe ausfüllen", "Fill dilution series"),
+    "dil_hint": ("füllt die markierten Zeilen (oder alle) von oben nach unten: Start, Start/Faktor, …",
+                 "fills the selected rows (or all) top to bottom: start, start/factor, …"),
+    "conc_none": ("Keine Probe mit Konzentration – nichts auszuwerten.",
+                  "No sample with a concentration – nothing to analyse."),
 }
 
 
