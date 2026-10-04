@@ -374,3 +374,56 @@ def overlay_vectors(pdf_path, items):
     data = doc.tobytes(garbage=3, deflate=True)
     doc.close()
     Path(pdf_path).write_bytes(data)
+
+
+def overlay_vectors_svg(svg_path, items):
+    """Strukturen (PDF-Seite) als Vektor-Gruppe in eine matplotlib-SVG einsetzen.
+    items: [(rect_pt (x0, y_top, x1, y_bottom), pdf_bytes, clip)]. matplotlib-SVG nutzt pt."""
+    import re
+    import pymupdf
+    svg = Path(svg_path).read_text(encoding="utf-8")
+    groups = []
+    for k, (rect, pdf_bytes, clip) in enumerate(items):
+        src = pymupdf.open("pdf", pdf_bytes)
+        page = src[0]
+        page.set_cropbox(pymupdf.Rect(*clip))
+        sub = page.get_svg_image(text_as_path=True)
+        m = re.search(r"<svg[^>]*>(.*)</svg>", sub, re.S)
+        vb = re.search(r'viewBox="([-\d.]+) ([-\d.]+) ([\d.]+) ([\d.]+)"', sub)
+        if not m or not vb:
+            continue
+        inner = m.group(1)
+        pre = f"uvs{k}_"                                   # IDs eindeutig machen
+        inner = re.sub(r'id="([^"]+)"', lambda mm: f'id="{pre}{mm.group(1)}"', inner)
+        inner = re.sub(r"url\(#([^)]+)\)", lambda mm: f"url(#{pre}{mm.group(1)})", inner)
+        inner = re.sub(r'href="#([^"]+)"', lambda mm: f'href="#{pre}{mm.group(1)}"', inner)
+        vx, vy, vw, vh = map(float, vb.groups())
+        x0, y0, x1, y1 = rect
+        sc = min((x1 - x0) / vw, (y1 - y0) / vh)
+        ox = x0 + ((x1 - x0) - vw * sc) / 2 - vx * sc
+        oy = y0 + ((y1 - y0) - vh * sc) / 2 - vy * sc
+        groups.append(f'<g id="structure_{k}" transform="translate({ox:.3f} {oy:.3f}) '
+                      f'scale({sc:.5f})">{inner}</g>')
+    if groups:
+        i = svg.rfind("</svg>")
+        svg = svg[:i] + "\n".join(groups) + "\n" + svg[i:]
+        if "xmlns:xlink" not in svg[:500]:
+            svg = svg.replace("<svg ", '<svg xmlns:xlink="http://www.w3.org/1999/xlink" ', 1)
+        Path(svg_path).write_text(svg, encoding="utf-8")
+
+
+def svg_defs_first(svg_path):
+    """matplotlib schreibt die Clip-Pfade ans Dateiende. Einige Programme (MuPDF, evtl. Word)
+    werten Vorwärtsverweise nicht aus -> Kurven ragen über die Achse. Block nach vorn ziehen."""
+    import re
+    svg = Path(svg_path).read_text(encoding="utf-8")
+    m = None
+    for m in re.finditer(r"\n <defs>\s*<clipPath.*?</defs>", svg, re.S):
+        pass
+    if not m:
+        return
+    block = m.group(0)
+    svg = svg[:m.start()] + svg[m.end():]
+    head = re.search(r"<svg[^>]*>", svg)
+    svg = svg[:head.end()] + block + svg[head.end():]
+    Path(svg_path).write_text(svg, encoding="utf-8")

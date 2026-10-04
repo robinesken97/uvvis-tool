@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.2.0"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -82,14 +82,24 @@ class Task(QThread):
 
 
 class GuiDragger(core.Dragger):
+    """Wie core.Dragger, meldet aber jede Änderung (Ziehen von Inset/Bild/Label, Mausrad)
+    an die GUI, damit Vorschau, Serienwechsel und Export dasselbe Layout verwenden."""
+
     def __init__(self, F, on_change):
         self.on_change = on_change
         super().__init__(F, None)
 
+    def _report(self):
+        # erst nach allen anderen Release-Handlern auslesen (Label-Drag von matplotlib)
+        QTimer.singleShot(0, lambda: self.on_change(self.F.current_layout()))
+
     def release(self, ev):
-        moved = self.drag is not None
         super().release(ev)
-        self.on_change(self.F.current_layout(), moved)
+        self._report()
+
+    def scroll(self, ev):
+        if super().scroll(ev):
+            self._report()
 
     def key(self, ev):
         pass
@@ -201,7 +211,10 @@ class MainWindow(QMainWindow):
         self._loading = False
         self.glob = {"path_length": 1.0, "cutoff": 1.0, "min_points": 3, "bands": "",
                      "baseline": "series", "bl_a": 1050.0, "bl_b": 1100.0, "ymax": 1.0,
-                     "r2": "legend", "show_err": False, "table": True}
+                     "r2": "legend", "show_err": False, "table": True,
+                     "size": "half_a4", "w_cm": 16.0, "h_cm": 11.0,
+                     "fmt_pdf": True, "fmt_svg": True, "fmt_png": True,
+                     "x_auto": True, "x_min": 200.0, "x_max": 1100.0}
 
         self.fig = MplFigure(figsize=FIGSIZE, dpi=PREVIEW_DPI)
         self.canvas = FigureCanvasQTAgg(self.fig)
@@ -291,6 +304,9 @@ class MainWindow(QMainWindow):
         row.addWidget(b1)
         row.addWidget(b2)
         f.addRow(T("structure"), row)
+        self.sp_struct_w = QDoubleSpinBox(decimals=1, minimum=3, maximum=90, singleStep=1, suffix=" %")
+        self.sp_struct_w.valueChanged.connect(lambda v: self.image_size_changed("struktur", v))
+        f.addRow(T("img_size"), self.sp_struct_w)
         row = QHBoxLayout()
         self.lbl_photo = QLabel("–")
         b1 = QPushButton(T("choose"))
@@ -301,6 +317,9 @@ class MainWindow(QMainWindow):
         row.addWidget(b1)
         row.addWidget(b2)
         f.addRow(T("photo"), row)
+        self.sp_photo_w = QDoubleSpinBox(decimals=1, minimum=2, maximum=60, singleStep=0.5, suffix=" %")
+        self.sp_photo_w.valueChanged.connect(lambda v: self.image_size_changed("kuevette", v))
+        f.addRow(T("img_size"), self.sp_photo_w)
         self.cmb_bg = QComboBox()
         for key in ("auto", "isnet", "grabcut", "border", "none"):
             self.cmb_bg.addItem(T({"auto": "bg_auto", "isnet": "bg_isnet", "grabcut": "bg_grabcut",
@@ -341,6 +360,15 @@ class MainWindow(QMainWindow):
         f = QFormLayout(g)
         self.sp_ymax = QDoubleSpinBox(decimals=2, minimum=0.05, maximum=10, singleStep=0.1)
         f.addRow(T("ymax"), self.sp_ymax)
+        row = QHBoxLayout()
+        self.cb_xauto = QCheckBox(T("xrange_auto"))
+        self.sp_xmin = QDoubleSpinBox(decimals=0, minimum=100, maximum=3500, singleStep=10)
+        self.sp_xmax = QDoubleSpinBox(decimals=0, minimum=100, maximum=3500, singleStep=10)
+        row.addWidget(self.cb_xauto)
+        row.addWidget(self.sp_xmin)
+        row.addWidget(QLabel("–"))
+        row.addWidget(self.sp_xmax)
+        f.addRow(T("xrange"), row)
         self.cmb_r2 = QComboBox()
         for key in ("legend", "label", "off"):
             self.cmb_r2.addItem(T({"legend": "r2_legend", "label": "r2_label", "off": "r2_off"}[key]), key)
@@ -349,6 +377,24 @@ class MainWindow(QMainWindow):
         self.cb_tab = QCheckBox(T("inset_table"))
         f.addRow(self.cb_err)
         f.addRow(self.cb_tab)
+        self.cmb_size = QComboBox()
+        for key in ("half_a4", "custom", "std"):
+            self.cmb_size.addItem(T({"half_a4": "size_half_a4", "custom": "size_custom",
+                                     "std": "size_std"}[key]), key)
+        f.addRow(T("size"), self.cmb_size)
+        row = QHBoxLayout()
+        self.sp_w = QDoubleSpinBox(decimals=1, minimum=4, maximum=40, singleStep=0.5, suffix=" cm")
+        self.sp_h = QDoubleSpinBox(decimals=1, minimum=3, maximum=40, singleStep=0.5, suffix=" cm")
+        row.addWidget(self.sp_w)
+        row.addWidget(QLabel("×"))
+        row.addWidget(self.sp_h)
+        f.addRow(T("size_wh"), row)
+        row = QHBoxLayout()
+        self.cb_pdf, self.cb_svg, self.cb_png = QCheckBox("PDF"), QCheckBox("SVG"), QCheckBox("PNG")
+        for cb in (self.cb_pdf, self.cb_svg, self.cb_png):
+            row.addWidget(cb)
+        row.addStretch(1)
+        f.addRow(T("formats"), row)
         lv.addWidget(g)
 
         row = QHBoxLayout()
@@ -402,8 +448,13 @@ class MainWindow(QMainWindow):
 
         self.apply_globals()
         self.apply_series_widgets()
-        for w in (self.sp_d, self.sp_cut, self.sp_ymax, self.sp_bla, self.sp_blb):
+        for w in (self.sp_d, self.sp_cut, self.sp_ymax, self.sp_bla, self.sp_blb, self.sp_w, self.sp_h,
+                  self.sp_xmin, self.sp_xmax):
             w.valueChanged.connect(self.changed)
+        self.cb_xauto.toggled.connect(self._xauto_toggled)
+        self.cmb_size.currentIndexChanged.connect(self._size_changed)
+        for cb in (self.cb_pdf, self.cb_svg, self.cb_png):
+            cb.toggled.connect(lambda *_: self.collect_globals())
         self.sp_min.valueChanged.connect(self.changed)
         self.ed_bands.editingFinished.connect(self.changed)
         for w in (self.cmb_bl, self.cmb_r2):
@@ -425,6 +476,18 @@ class MainWindow(QMainWindow):
         self.cmb_r2.setCurrentIndex(self.cmb_r2.findData(gl["r2"]))
         self.cb_err.setChecked(gl["show_err"])
         self.cb_tab.setChecked(gl["table"])
+        self.cmb_size.setCurrentIndex(max(0, self.cmb_size.findData(gl["size"])))
+        self.sp_w.setValue(gl["w_cm"])
+        self.sp_h.setValue(gl["h_cm"])
+        self.cb_pdf.setChecked(gl["fmt_pdf"])
+        self.cb_svg.setChecked(gl["fmt_svg"])
+        self.cb_png.setChecked(gl["fmt_png"])
+        self.cb_xauto.setChecked(gl["x_auto"])
+        self.sp_xmin.setValue(gl["x_min"])
+        self.sp_xmax.setValue(gl["x_max"])
+        self.sp_xmin.setEnabled(not gl["x_auto"])
+        self.sp_xmax.setEnabled(not gl["x_auto"])
+        self._update_size_widgets()
         manual = gl["baseline"] == "manual"
         self.sp_bla.setEnabled(manual)
         self.sp_blb.setEnabled(manual)
@@ -436,7 +499,24 @@ class MainWindow(QMainWindow):
                          baseline=self.cmb_bl.currentData(), bl_a=self.sp_bla.value(),
                          bl_b=self.sp_blb.value(), ymax=self.sp_ymax.value(),
                          r2=self.cmb_r2.currentData(), show_err=self.cb_err.isChecked(),
-                         table=self.cb_tab.isChecked())
+                         table=self.cb_tab.isChecked(), size=self.cmb_size.currentData(),
+                         w_cm=self.sp_w.value(), h_cm=self.sp_h.value(),
+                         fmt_pdf=self.cb_pdf.isChecked(), fmt_svg=self.cb_svg.isChecked(),
+                         fmt_png=self.cb_png.isChecked(), x_auto=self.cb_xauto.isChecked(),
+                         x_min=self.sp_xmin.value(), x_max=self.sp_xmax.value())
+
+    def _update_size_widgets(self):
+        key = self.cmb_size.currentData()
+        if key == "half_a4":
+            self.sp_w.blockSignals(True)
+            self.sp_h.blockSignals(True)
+            self.sp_w.setValue(16.0)
+            self.sp_h.setValue(11.0)
+            self.sp_w.blockSignals(False)
+            self.sp_h.blockSignals(False)
+        custom = key == "custom"
+        self.sp_w.setEnabled(custom)
+        self.sp_h.setEnabled(custom)
 
     def apply_series_widgets(self):
         self._loading = True
@@ -449,7 +529,32 @@ class MainWindow(QMainWindow):
         self.lbl_chem.setStyleSheet("color: #b35900;" if st and st.get("chem_warn") else "")
         pa = st.get("photo_asset") if st else None
         self.lbl_thumb.setPixmap(rgba_to_pixmap(pa["rgba"]) if pa else QPixmap())
+        self.sp_struct_w.setValue(st.get("struct_w", 17.0) if st else 17.0)
+        self.sp_photo_w.setValue(st.get("photo_w", 9.0) if st else 9.0)
+        self.sp_struct_w.setEnabled(bool(st and st["structure"]))
+        self.sp_photo_w.setEnabled(bool(st and st["photo"]))
         self._loading = False
+
+    def _xauto_toggled(self, on):
+        if self._loading:
+            return
+        self.sp_xmin.setEnabled(not on)
+        self.sp_xmax.setEnabled(not on)
+        if not on and self.current in self.groups:       # mit dem Datenbereich vorbelegen
+            xs = np.concatenate([s_["x"] for s_ in self.groups[self.current]])
+            self._loading = True
+            if self.sp_xmin.value() <= xs.min() or self.sp_xmin.value() >= xs.max():
+                self.sp_xmin.setValue(float(np.floor(xs.min())))
+            if self.sp_xmax.value() >= xs.max() or self.sp_xmax.value() <= self.sp_xmin.value():
+                self.sp_xmax.setValue(float(np.ceil(xs.max())))
+            self._loading = False
+        self.changed()
+
+    def _size_changed(self, *_):
+        if self._loading:
+            return
+        self._update_size_widgets()
+        self.changed()
 
     def switch_lang(self, code):
         self.collect_globals()
@@ -524,7 +629,8 @@ class MainWindow(QMainWindow):
         for g in groups:
             self.series.setdefault(g, {"mw": None, "structure": None, "photo": None, "bg": "auto",
                                        "layout": {}, "structure_asset": None, "photo_asset": None,
-                                       "chem_info": "", "chem_warn": False})
+                                       "chem_info": "", "chem_warn": False,
+                                       "struct_w": 17.0, "photo_w": 9.0})
         if self.current not in groups:
             self.current = next(iter(groups), None)
         self.cmb_series.blockSignals(True)
@@ -547,7 +653,8 @@ class MainWindow(QMainWindow):
         self.collect_globals()
         data = {"global": self.glob,
                 "concentrations": self.conc,
-                "series": {g: {k: st[k] for k in ("mw", "structure", "photo", "bg", "layout")}
+                "series": {g: {k: st.get(k) for k in ("mw", "structure", "photo", "bg", "layout",
+                                                       "struct_w", "photo_w")}
                            for g, st in self.series.items()}}
         try:
             pf.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -572,7 +679,7 @@ class MainWindow(QMainWindow):
             if g not in self.series:
                 continue
             st = self.series[g]
-            st.update({k: sd.get(k, st[k]) for k in ("mw", "bg", "layout")})
+            st.update({k: sd.get(k) or st.get(k) for k in ("mw", "bg", "layout", "struct_w", "photo_w")})
             st["layout"] = st["layout"] or {}
             if sd.get("structure") and Path(sd["structure"]).exists():
                 self.set_structure(sd["structure"], g, render=False, sync=True, autofill_mw=False)
@@ -766,16 +873,25 @@ class MainWindow(QMainWindow):
             cfg["baseline_nm"] = "auto"
             cfg["baseline_mode"] = gl["baseline"]
         cfg["ylim"] = [0, gl["ymax"]]
+        if not gl["x_auto"] and gl["x_max"] > gl["x_min"]:
+            cfg["xlim"] = [gl["x_min"], gl["x_max"]]
         cfg["r2_mode"] = gl["r2"]
         cfg["labels"]["show_error"] = gl["show_err"]
         cfg["inset"]["table"] = gl["table"]
         cfg["figsize_in"] = list(FIGSIZE)
+        if gl["size"] != "std":
+            core.apply_export_size(cfg, gl["w_cm"], gl["h_cm"])
+        fmts = [e for e, on in (("pdf", gl["fmt_pdf"]), ("svg", gl["fmt_svg"]), ("png", gl["fmt_png"])) if on]
+        cfg["extra_formats"] = fmts[1:]
+        cfg["_main_fmt"] = fmts[0] if fmts else "pdf"
         imgs = []
         if st["structure_asset"]:
-            imgs.append({"file": st["structure"], "id": "struktur", "width": 0.17, "prefer": "top",
+            imgs.append({"file": st["structure"], "id": "struktur", "width": st.get("struct_w", 17) / 100,
+                         "prefer": "top",
                          "_asset": st["structure_asset"]})
         if st["photo_asset"]:
-            imgs.append({"file": st["photo"], "id": "kuevette", "width": 0.09, "prefer": "right",
+            imgs.append({"file": st["photo"], "id": "kuevette", "width": st.get("photo_w", 9) / 100,
+                         "prefer": "right",
                          "_asset": st["photo_asset"]})
         cfg["images"] = imgs
         return cfg
@@ -791,8 +907,13 @@ class MainWindow(QMainWindow):
             if self.dragger:
                 self.dragger.disconnect()
                 self.dragger = None
-            self.F = core.build_figure(plt, cfg2, spectra, results, self.series[g]["layout"], fig=self.fig)
+            wpx, hpx = int(cfg2["figsize_in"][0] * PREVIEW_DPI), int(cfg2["figsize_in"][1] * PREVIEW_DPI)
+            if (self.canvas.width(), self.canvas.height()) != (wpx, hpx):
+                self.canvas.setFixedSize(wpx, hpx)
+                QApplication.processEvents()
+            self.F = core.build_figure(plt, cfg2, spectra, results, self.get_layout(g), fig=self.fig)
             self.dragger = GuiDragger(self.F, self.layout_changed)
+            self.sync_image_sizes(self.F.current_layout())
             self.canvas.draw_idle()
             self.fill_table(results, cfg2)
             self._last = (cfg2, results)
@@ -800,13 +921,59 @@ class MainWindow(QMainWindow):
             self.log_signal.emit(traceback.format_exc())
             self.statusBar().showMessage(f"{T('err_title')}: {e}", 8000)
 
-    def layout_changed(self, layout, moved):
-        if self.current and moved:
-            self.series[self.current]["layout"] = layout
+    def size_key(self):
+        gl = self.glob
+        return "std" if gl["size"] == "std" else f"{gl['w_cm']:g}x{gl['h_cm']:g}"
+
+    def get_layout(self, g):
+        lay = self.series[g]["layout"] or {}
+        if lay and not all(isinstance(v, dict) for v in lay.values()):
+            lay = {"std": lay}                       # altes Format (eine Größe)
+            self.series[g]["layout"] = lay
+        return lay.setdefault(self.size_key(), {})
+
+    def layout_changed(self, layout):
+        if not self.current or self.F is None:
+            return
+        stored = self.get_layout(self.current)
+        if layout != stored:
+            self.series[self.current]["layout"][self.size_key()] = layout
+        self.sync_image_sizes(layout)
+
+    def sync_image_sizes(self, layout):
+        """Größenfelder an die tatsächliche Bildgröße anpassen (Mausrad, automatisches Verkleinern)."""
+        st = self.series.get(self.current)
+        if not st:
+            return
+        self._loading = True
+        for key, field, spin in (("image_struktur", "struct_w", self.sp_struct_w),
+                                 ("image_kuevette", "photo_w", self.sp_photo_w)):
+            if key in layout and len(layout[key]) == 4:
+                st[field] = round(layout[key][2] * 100, 1)
+                spin.setValue(st[field])
+        self._loading = False
+
+    def image_size_changed(self, iid, value):
+        """Größe aus dem Zahlenfeld: Breite setzen, Mittelpunkt und Seitenverhältnis behalten."""
+        if self._loading or not self.current:
+            return
+        st = self.series[self.current]
+        st["struct_w" if iid == "struktur" else "photo_w"] = value
+        lay = self.get_layout(self.current)
+        key = f"image_{iid}"
+        if key in lay and len(lay[key]) == 4:
+            x, y, w, h = lay[key]
+            nw = value / 100
+            nh = h * nw / w
+            nx = min(max(x + (w - nw) / 2, 0.0), max(0.0, 1 - nw))     # in der Achse halten
+            ny = min(max(y + (h - nh) / 2, 0.0), max(0.0, 1 - nh))
+            lay[key] = [nx, ny, nw, nh]
+        self.timer.start()
 
     def reset_layout(self):
         if self.current:
-            self.series[self.current]["layout"] = {}
+            self.get_layout(self.current)
+            self.series[self.current]["layout"][self.size_key()] = {}
             self.render()
 
     def fill_table(self, results, cfg):
@@ -852,13 +1019,14 @@ class MainWindow(QMainWindow):
             core.setup_fonts(plt, cfg)
             cfg2, spectra, results = core.prepare_series(cfg, self.groups[g], g)
             name = f"{stem}_{g}" if len(self.groups) > 1 else stem
-            cfg2["output"] = str(folder / f"{name}.pdf")
-            fig = MplFigure(figsize=FIGSIZE, dpi=PREVIEW_DPI)
+            cfg2["output"] = str(folder / f"{name}.{cfg2['_main_fmt']}")
+            fig = MplFigure(figsize=cfg2["figsize_in"], dpi=PREVIEW_DPI)
             FigureCanvasAgg(fig)
-            F = core.build_figure(plt, cfg2, spectra, results, self.series[g]["layout"], fig=fig)
+            F = core.build_figure(plt, cfg2, spectra, results, self.get_layout(g), fig=fig)
             F.export()
             core.write_results(results, folder / f"{name}_results.csv", cfg2)
-            written += [folder / f"{name}.pdf", folder / f"{name}.png", folder / f"{name}_results.csv"]
+            written += [folder / f"{name}.{e}" for e in [cfg2["_main_fmt"]] + cfg2["extra_formats"]]
+            written.append(folder / f"{name}_results.csv")
         self.save_project()
         return written
 
@@ -972,6 +1140,9 @@ def selftest(outdir, with_isnet=False):
         page = pymupdf.open(str(out / "selftest_TEST-A.pdf"))[0]
         report.append(f"pdf: {len(page.get_drawings())} vector paths, {len(page.get_images())} images")
         assert page.get_images(), "photo missing in PDF"
+        svg = (out / "selftest_TEST-A.svg").read_text(encoding="utf-8")
+        assert "structure_0" in svg and "<image" in svg, "SVG ohne Struktur/Foto"
+        report.append(f"pdf size: {page.rect.width / 72 * 2.54:.2f} x {page.rect.height / 72 * 2.54:.2f} cm")
         # Probennamen ohne Konzentration (z. B. c0..c4) -> Overrides wie aus dem Dialog
         txt = csv.read_text(encoding="utf-8").splitlines()
         n_samples = len([n for n in txt[0].split(",") if n])

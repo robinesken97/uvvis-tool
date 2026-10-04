@@ -118,10 +118,10 @@ TEXTS = {
     "btn_update": ("Aktualisieren", "Update"),
     "btn_reset_layout": ("Layout zurücksetzen", "Reset layout"),
     "btn_export": ("Exportieren…", "Export…"),
-    "drag_hint": ("Inset, Bilder und Labels lassen sich mit der Maus verschieben. CSV, Struktur "
-                  "und Foto können auch einfach ins Fenster gezogen werden.",
-                  "Inset, images and labels can be dragged with the mouse. CSV, structure and "
-                  "photo can also be dropped onto the window."),
+    "drag_hint": ("Maus: Inset, Bilder und Labels ziehen zum Verschieben, Mausrad über Inset/Bild "
+                  "ändert die Größe. CSV, Struktur und Foto können ins Fenster gezogen werden.",
+                  "Mouse: drag inset, images and labels to move them; scroll over inset/image to "
+                  "resize. CSV, structure and photo can be dropped onto the window."),
     "tab_results": ("Ergebnisse", "Results"),
     "tab_log": ("Protokoll", "Log"),
     "col_lam": ("λ [nm]", "λ [nm]"),
@@ -155,6 +155,15 @@ TEXTS = {
               "UV-Vis Analysis {v}\nBeer–Lambert analysis of dilution series."),
     "load_first": ("Bitte zuerst eine CSV öffnen.", "Please open a CSV first."),
     "act_conc": ("Konzentrationen…", "Concentrations…"),
+    "size": ("Größe", "Size"),
+    "size_std": ("Standard (eng zugeschnitten)", "Standard (tight crop)"),
+    "size_half_a4": ("Word: halbe A4-Seite (16 × 11 cm)", "Word: half A4 page (16 × 11 cm)"),
+    "size_custom": ("benutzerdefiniert", "custom"),
+    "size_wh": ("Breite × Höhe [cm]", "Width × height [cm]"),
+    "formats": ("Formate", "Formats"),
+    "img_size": ("Größe [% Plotbreite]", "Size [% of plot width]"),
+    "xrange": ("λ-Bereich [nm]", "λ range [nm]"),
+    "xrange_auto": ("gesamt", "full"),
     "conc_title": ("Konzentrationen eingeben", "Enter concentrations"),
     "conc_intro": ("Die Probennamen enthalten keine (vollständigen) Konzentrationsangaben. "
                    "Bitte Konzentrationen eintragen – Proben ohne Wert (z. B. Blindprobe) werden "
@@ -185,7 +194,7 @@ def get_lang() -> str:
     return _LANG
 
 
-def T(key: str, **kw) -> str:
-    de, en = TEXTS.get(key, (key, key))
+def T(_key: str, **kw) -> str:
+    de, en = TEXTS.get(_key, (_key, _key))
     txt = en if _LANG == "en" else de
     return txt.format(**kw) if kw else txt

@@ -19,6 +19,7 @@ import re
 import sys
 from pathlib import Path
 
+import matplotlib
 import numpy as np
 import yaml
 from PIL import Image
@@ -41,6 +42,8 @@ DEFAULTS = {
     "extra_formats": ["png"],
     "dpi": 600,
     "figsize_in": [8.0, 6.0],
+    "size_cm": None,                         # z. B. [16, 10.5]: exakte Exportgröße, Schrift skaliert
+    "scale": 1.0,                            # wird aus size_cm berechnet
     "axes_rect": [0.12, 0.13, 0.85, 0.84],   # Position der Hauptachse in Figurkoordinaten
     "font": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
     "font_size": 16,
@@ -107,6 +110,50 @@ def conc_factor(cfg):
         mw = cfg.get("molar_mass_g_mol")
         return (1.0 / float(mw)) if mw else None
     return CONC_TO_M[cfg["conc_unit"]]
+
+
+def clip_polyline(x, y, xlim, ylim):
+    """Linienzug auf das Rechteck xlim×ylim beschneiden: Schnittpunkte mit dem Rand
+    einfügen, Teile außerhalb durch NaN-Lücken ersetzen."""
+    x0, x1 = sorted(xlim)
+    y0, y1 = sorted(ylim)
+    sel = (x >= x0) & (x <= x1)
+    x, y = np.asarray(x, float)[sel], np.asarray(y, float)[sel]
+    if len(x) < 2:
+        return x, y
+    out_x, out_y = [x[0]], [y[0] if y0 <= y[0] <= y1 else np.nan]
+    for i in range(1, len(x)):
+        xa, ya, xb, yb = x[i - 1], y[i - 1], x[i], y[i]
+        for lim in (y0, y1):                       # Grenzübergänge zwischen a und b
+            if (ya - lim) * (yb - lim) < 0:
+                t = (lim - ya) / (yb - ya)
+                xc = xa + t * (xb - xa)
+                entering = (y0 <= yb <= y1)
+                if entering:
+                    out_x += [xc, xc]
+                    out_y += [np.nan, lim]
+                else:
+                    out_x += [xc, xc]
+                    out_y += [lim, np.nan]
+        out_x.append(xb)
+        out_y.append(yb if y0 <= yb <= y1 else np.nan)
+    return np.array(out_x), np.array(out_y)
+
+
+def apply_export_size(cfg, w_cm, h_cm):
+    """Figur exakt w×h cm groß machen; Schrift, Linien und Abstände mitskalieren.
+    Referenz ist das Standardformat 8×6 Zoll (20.3×15.2 cm)."""
+    w_in, h_in = w_cm / 2.54, h_cm / 2.54
+    s = min(w_in / 8.0, h_in / 6.0)
+    cfg["size_cm"] = [w_cm, h_cm]
+    cfg["figsize_in"] = [w_in, h_in]
+    cfg["scale"] = s
+    cfg["font_size"] = DEFAULTS["font_size"] * s
+    cfg["line_width"] = max(0.6, DEFAULTS["line_width"] * s)
+    cfg["labels"]["font_size"] = DEFAULTS["labels"]["font_size"] * s
+    cfg["inset"]["font_size"] = max(5.5, DEFAULTS["inset"]["font_size"] * s)
+    cfg["inset"]["table_font_size"] = max(5.0, DEFAULTS["inset"]["table_font_size"] * s)
+    return cfg
 
 
 def coeff_symbol_unit(cfg):
@@ -559,7 +606,7 @@ def setup_fonts(plt, cfg):
         "mathtext.bf": f"{family}:bold",
         "mathtext.sf": family, "mathtext.cal": family, "mathtext.tt": family,
         "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
-        "axes.linewidth": 1.0,
+        "axes.linewidth": max(0.6, cfg.get("scale", 1.0)),
     })
     return family
 
@@ -579,6 +626,7 @@ class Figure:
         self.tight_off = {}      # id -> (dx0, dy0, w, h) Tight-Box relativ zur Achsenposition
         self.ann_items = {}      # id -> Annotation
         self._main()
+        self._fit_axes(0.01 if cfg.get("size_cm") else 0.06)
         self._inset()
         self._labels()
         self._images()
@@ -587,21 +635,42 @@ class Figure:
     # -- Hauptplot -----------------------------------------------------------
     def _main(self):
         cfg, ax = self.cfg, self.ax
-        for s in self.spectra:
-            ax.plot(s["x"], s["y"], color=s.get("color") or cfg["line_color"],
-                    lw=cfg["line_width"], solid_joinstyle="round")
         xs = np.concatenate([s["x"] for s in self.spectra])
-        ax.set_xlim(cfg["xlim"] or (xs.min(), xs.max()))
-        ax.set_ylim(cfg["ylim"] or (0, cfg["max_abs_fit"]))
+        xlim = cfg["xlim"] or (xs.min(), xs.max())
+        ylim = cfg["ylim"] or (0, cfg["max_abs_fit"])
+        for s in self.spectra:
+            # Kurven geometrisch an den Achsengrenzen kappen statt per Clip-Pfad:
+            # manche SVG-Renderer (MuPDF, evtl. Word) ignorieren Clip-Pfade
+            cx, cy = clip_polyline(s["x"], s["y"], xlim, ylim)
+            ax.plot(cx, cy, color=s.get("color") or cfg["line_color"],
+                    lw=cfg["line_width"], solid_joinstyle="round", solid_capstyle="butt")
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
         ax.set_xlabel(cfg["xlabel"], fontsize=cfg["font_size"] * 1.3)
         ax.set_ylabel(cfg["ylabel"], fontsize=cfg["font_size"] * 1.3)
         ax.minorticks_on()
         ax.tick_params(which="both", direction=cfg["tick_direction"], top=False, right=False)
-        ax.tick_params(which="major", length=6)
-        ax.tick_params(which="minor", length=3)
+        sc = cfg.get("scale", 1.0)
+        ax.tick_params(which="major", length=6 * sc, width=max(0.6, sc))
+        ax.tick_params(which="minor", length=3 * sc, width=max(0.5, 0.8 * sc))
         if not cfg["frame"]:
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
+
+    def _fit_axes(self, pad_in=0.06):
+        """Achse so setzen, dass Achsenbeschriftungen exakt in die Figur passen
+        (wichtig bei fester Exportgröße, da dann nicht zugeschnitten wird)."""
+        rend = self._renderer()
+        fw, fh = self.fig.get_size_inches() * self.fig.dpi
+        tb = self.ax.get_tightbbox(rend)
+        ab = self.ax.get_window_extent(rend)
+        pad = pad_in * self.fig.dpi
+        left = (ab.x0 - tb.x0 + pad) / fw
+        bottom = (ab.y0 - tb.y0 + pad) / fh
+        right = 1 - (tb.x1 - ab.x1 + pad) / fw
+        top = 1 - (tb.y1 - ab.y1 + pad) / fh
+        if right - left > 0.3 and top - bottom > 0.3:
+            self.ax.set_position([left, bottom, right - left, top - bottom])
 
     def _af_to_fig(self, x, y):
         disp = self.ax.transAxes.transform((x, y))
@@ -637,10 +706,12 @@ class Figure:
                 lbl = f"{r['lam']:g} nm   $R^2$ = {r['fit']['r2']:.4f}"
             if r["used"]:
                 c, A = np.array(r["used"]).T
-                iax.plot(c, A / d, "s", color=col, ms=4, label=lbl, zorder=3)
+                iax.plot(c, A / d, "s", color=col, ms=max(2.5, 4 * self.cfg.get("scale", 1.0)),
+                         label=lbl, zorder=3)
             if icfg["show_excluded"] and r["excluded"]:
                 c, A = np.array(r["excluded"]).T
-                iax.plot(c, A / d, "s", mfc="none", color=col, ms=4, zorder=3)
+                iax.plot(c, A / d, "s", mfc="none", color=col,
+                         ms=max(2.5, 4 * self.cfg.get("scale", 1.0)), zorder=3)
             ft = r["fit"]
             if ft and r["used"]:
                 cc = np.array([c for c, _ in r["used"]])
@@ -880,32 +951,46 @@ class Figure:
         return out
 
     def export(self):
+        """PDF/SVG mit Struktur als Vektorgrafik, PNG gerastert.
+        Mit size_cm: exakt diese Größe (kein Zuschnitt), sonst eng zugeschnitten."""
         out = Path(self.cfg["output"])
         if not out.is_absolute():
             out = self.cfg["_base_dir"] / out
         out.parent.mkdir(parents=True, exist_ok=True)
         paths = [out] + [out.with_suffix("." + e.lstrip(".")) for e in self.cfg["extra_formats"]]
-        bb = self.fig.get_tightbbox(self._renderer()).padded(0.05)    # in Zoll, fester Zuschnitt
-        vec = [a for a in self.axes_items.values() if getattr(a, "_vector", None)]
         W, H = self.fig.get_size_inches()
+        if self.cfg.get("size_cm"):
+            from matplotlib.transforms import Bbox
+            bb = Bbox.from_bounds(0, 0, W, H)
+        else:
+            bb = self.fig.get_tightbbox(self._renderer()).padded(0.05)    # in Zoll
+        vec = [a for a in self.axes_items.values() if getattr(a, "_vector", None)]
         kw = dict(dpi=self.cfg["dpi"], bbox_inches=bb, facecolor="white")
+
+        def rects():
+            for a in vec:
+                q = a.get_position()
+                yield ((q.x0 * W - bb.x0) * 72, (bb.y1 - q.y1 * H) * 72,
+                       (q.x1 * W - bb.x0) * 72, (bb.y1 - q.y0 * H) * 72), a._vector
+
         for p in dict.fromkeys(paths):
-            if p.suffix.lower() == ".pdf" and vec:
-                # Strukturen als echte Vektorgrafik: Raster-Vorschau ausblenden, PDF einsetzen
+            ext = p.suffix.lower()
+            if ext in (".pdf", ".svg") and vec:
                 for a in vec:
                     a.set_visible(False)
-                self.fig.savefig(p, **kw)
+                with matplotlib.rc_context({"svg.fonttype": "path"}):
+                    self.fig.savefig(p, **kw)
                 for a in vec:
                     a.set_visible(True)
-                items = []
-                for a in vec:
-                    q = a.get_position()
-                    rect = ((q.x0 * W - bb.x0) * 72, (bb.y1 - q.y1 * H) * 72,
-                            (q.x1 * W - bb.x0) * 72, (bb.y1 - q.y0 * H) * 72)
-                    items.append((rect, a._vector[0], a._vector[1]))
-                IMG.overlay_vectors(p, items)
+                items = [(r, v[0], v[1]) for r, v in rects()]
+                (IMG.overlay_vectors if ext == ".pdf" else IMG.overlay_vectors_svg)(p, items)
+            elif ext == ".svg":
+                with matplotlib.rc_context({"svg.fonttype": "path"}):
+                    self.fig.savefig(p, **kw)
             else:
                 self.fig.savefig(p, **kw)
+            if ext == ".svg":
+                IMG.svg_defs_first(p)
             log("  " + T("saved", p=p))
 
 
@@ -929,16 +1014,19 @@ def load_asset(im, cfg):
 
 
 class Dragger:
-    """Linke Maustaste: Inset/Bilder/Labels verschieben. 'w' = Layout speichern + exportieren."""
+    """Maus: Inset/Bilder/Labels verschieben (linke Taste), Inset/Bilder skalieren (Mausrad).
+    'w' = Layout speichern + exportieren (nur Kommandozeile)."""
 
     def __init__(self, F, layout_path):
         self.F, self.layout_path, self.drag = F, layout_path, None
+        self._cursor = None
         for ann in F.ann_items.values():
             ann.draggable(True)
         c = F.fig.canvas
         self.cids = [c.mpl_connect("button_press_event", self.press),
                      c.mpl_connect("motion_notify_event", self.move),
                      c.mpl_connect("button_release_event", self.release),
+                     c.mpl_connect("scroll_event", self.scroll),
                      c.mpl_connect("key_press_event", self.key)]
 
     def disconnect(self):
@@ -950,16 +1038,37 @@ class Dragger:
             except Exception:
                 pass
 
-    def press(self, ev):
-        if ev.button != 1 or any(a.contains(ev)[0] for a in self.F.ann_items.values()):
-            return
+    def _axes_at(self, ev):
         for a in reversed(list(self.F.axes_items.values())):
             if a.get_window_extent().contains(ev.x, ev.y):
-                self.drag = (a, ev.x, ev.y, a.get_position().frozen())
-                return
+                return a
+        return None
+
+    def _over_label(self, ev):
+        return any(a.contains(ev)[0] for a in self.F.ann_items.values())
+
+    def _set_cursor(self, kind):
+        if kind == self._cursor:
+            return
+        self._cursor = kind
+        try:
+            from matplotlib.backend_tools import Cursors
+            self.F.fig.canvas.set_cursor(Cursors.MOVE if kind else Cursors.POINTER)
+        except Exception:
+            pass
+
+    def press(self, ev):
+        if ev.button != 1 or ev.x is None or self._over_label(ev):
+            return
+        a = self._axes_at(ev)
+        if a is not None:
+            self.drag = (a, ev.x, ev.y, a.get_position().frozen())
 
     def move(self, ev):
-        if not self.drag or ev.x is None:
+        if ev.x is None:
+            return
+        if not self.drag:
+            self._set_cursor(self._over_label(ev) or self._axes_at(ev) is not None)
             return
         a, x0, y0, p = self.drag
         fb = self.F.fig.bbox
@@ -970,8 +1079,37 @@ class Dragger:
     def release(self, ev):
         self.drag = None
 
+    def scroll(self, ev):
+        """Mausrad: Inset oder Bild um seinen Mittelpunkt vergrößern/verkleinern."""
+        if ev.x is None:
+            return False
+        a = self._axes_at(ev)
+        if a is None:
+            return False
+        # Mausrad: ein Schritt pro Raste. Trackpads (v. a. macOS) liefern Pixel-Deltas und sehr
+        # viele Ereignisse -> pro Ereignis kleiner fester Schritt und Zeitdrossel.
+        import time
+        now = time.monotonic()
+        if now - getattr(self, "_last_scroll", 0) < 0.05:
+            return False
+        self._last_scroll = now
+        up = (ev.step > 0) if ev.step else (ev.button == "up")
+        f = 1.03 if up else 1 / 1.03
+        p = a.get_position()
+        w, h = p.width * f, p.height * f
+        if not (0.03 < w < 0.95 and 0.03 < h < 0.95):
+            return False
+        cx, cy = p.x0 + p.width / 2, p.y0 + p.height / 2
+        x0, y0 = cx - w / 2, cy - h / 2
+        ap = self.F.ax.get_position()                 # innerhalb der Hauptachse halten
+        x0 = min(max(x0, ap.x0), ap.x1 - w)
+        y0 = min(max(y0, ap.y0), ap.y1 - h)
+        a.set_position([x0, y0, w, h])
+        self.F.fig.canvas.draw_idle()
+        return True
+
     def key(self, ev):
-        if ev.key == "w":
+        if ev.key == "w" and self.layout_path:
             lay = self.F.current_layout()
             self.layout_path.write_text(yaml.safe_dump(lay, sort_keys=True), encoding="utf-8")
             log("  " + T("saved", p=self.layout_path))
@@ -1063,9 +1201,15 @@ def prepare_series(cfg, spectra, tag=""):
         log(f"  {s_.get('name', ''):30s} c = {s_['c']:g} {cfg['conc_unit']}")
     if cfg["conc_unit"] == "mg/mL" and not cfg.get("molar_mass_g_mol"):
         log("  " + T("no_mw"))
-    bl = apply_baseline(spectra, cfg)
-    if bl and cfg["peak_range_nm"][1] is None:
-        cfg["peak_range_nm"] = [cfg["peak_range_nm"][0], bl["window"][0] - 10]
+    bl = apply_baseline(spectra, cfg)                 # Basislinie immer aus dem vollen Datenbereich
+    lo, hi = cfg["peak_range_nm"]
+    if bl:
+        hi = min(hi if hi is not None else np.inf, bl["window"][0] - 10)
+    if cfg.get("xlim"):                                # Peaksuche nur im dargestellten Bereich
+        lo = max(lo if lo is not None else -np.inf, min(cfg["xlim"]))
+        hi = min(hi if hi is not None else np.inf, max(cfg["xlim"]))
+    cfg["peak_range_nm"] = [None if lo in (None, -np.inf) else float(lo),
+                            None if hi in (None, np.inf) else float(hi)]
     if cfg["wavelengths_nm"] in ("auto", None, []):
         cfg["wavelengths_nm"] = detect_peaks(spectra, cfg)
         log("  " + T("peaks_found", l=", ".join(f"{l_:g}" for l_ in cfg["wavelengths_nm"])))
