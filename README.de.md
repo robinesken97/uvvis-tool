@@ -29,7 +29,7 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
 
 1. **Daten öffnen:** Datei → CSV öffnen, oder die CSV ins Fenster ziehen.
 2. **Konzentrationen:** Die Konzentrationen werden aus den Probennamen gelesen, z. B.
-   `RE-2-184-0p5mgml_THF` → Serie `RE-2-184`, 0,5 mg/mL. Erkannt werden
+   `ABC-1-0p5mgml_THF` → Serie `ABC-1`, 0,5 mg/mL. Erkannt werden
    `mgml`/`mg_ml`/`mg/ml`, `mM`, `uM`/`µM`; `p` steht für das Dezimalkomma.
    - Stehen keine Konzentrationen im Namen (z. B. `c0` … `c4`), öffnet sich eine Tabelle zum Eintragen.
    - „Verdünnungsreihe ausfüllen“ setzt in die markierten Zeilen (oder alle) von oben nach unten Start, Start/Faktor, … ein.

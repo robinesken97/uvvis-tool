@@ -29,7 +29,7 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
 
 1. **Open data:** File → Open CSV, or drag the CSV onto the window.
 2. **Concentrations:** Concentrations are read from the sample names, e.g.
-   `RE-2-184-0p5mgml_THF` → series `RE-2-184`, 0.5 mg/mL. Recognised units are
+   `ABC-1-0p5mgml_THF` → series `ABC-1`, 0.5 mg/mL. Recognised units are
    `mgml`/`mg_ml`/`mg/ml`, `mM`, `uM`/`µM`; `p` stands for the decimal point.
    - If the names contain no concentrations (e.g. `c0` … `c4`), a table opens where you enter them.
    - "Fill dilution series" fills the selected rows (or all of them) with start, start/factor, … from top to bottom.
