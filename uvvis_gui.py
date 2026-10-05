@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -105,6 +105,13 @@ class GuiDragger(core.Dragger):
         pass
 
 
+DEFAULT_GLOB = {"path_length": 1.0, "cutoff": 1.0, "min_points": 3, "bands": "",
+                "baseline": "series", "bl_a": 1050.0, "bl_b": 1100.0, "ymax": 1.0,
+                "r2": "legend", "show_err": False, "table": True,
+                "size": "half_a4", "w_cm": 16.0, "h_cm": 11.0,
+                "fmt_pdf": True, "fmt_svg": True, "fmt_png": True,
+                "x_auto": True, "x_min": 200.0, "x_max": 1100.0}
+
 UNITS = [("mM", "mM"), ("uM", "µM"), ("mg/mL", "mg/mL"), ("M", "M")]
 
 
@@ -127,9 +134,10 @@ class ConcDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(QLabel(T("unit")))
         self.cmb_unit = QComboBox()
+        self.cmb_unit.addItem(T("unit_choose"), None)          # keine stille Vorbelegung
         for key, label in UNITS:
             self.cmb_unit.addItem(label, key)
-        self.cmb_unit.setCurrentIndex(max(0, self.cmb_unit.findData(unit0 or "mM")))
+        self.cmb_unit.setCurrentIndex(max(0, self.cmb_unit.findData(unit0)) if unit0 else 0)
         row.addWidget(self.cmb_unit)
         row.addStretch(1)
         lay.addLayout(row)
@@ -153,7 +161,7 @@ class ConcDialog(QDialog):
 
         row = QHBoxLayout()
         row.addWidget(QLabel(T("dil_start")))
-        self.sp_start = QDoubleSpinBox(decimals=4, minimum=0.0, maximum=1e6, value=1.0)
+        self.sp_start = QDoubleSpinBox(decimals=4, minimum=0.0, maximum=1e6, value=0.0)
         row.addWidget(self.sp_start)
         row.addWidget(QLabel(T("dil_factor")))
         self.sp_fac = QDoubleSpinBox(decimals=3, minimum=1.0, maximum=1000, value=2.0)
@@ -167,18 +175,28 @@ class ConcDialog(QDialog):
         hint.setStyleSheet("color: gray;")
         lay.addWidget(hint)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self.accept)
+        bb.accepted.connect(self.try_accept)
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
         self.table.setMinimumHeight(36 + 30 * min(len(samples), 12))
         self.resize(600, 300 + 30 * min(len(samples), 12))
 
     def fill_dilution(self):
+        if self.sp_start.value() <= 0:
+            QMessageBox.warning(self, T("conc_title"), T("start_missing"))
+            return
         rows = sorted({i.row() for i in self.table.selectedIndexes()}) or list(range(self.table.rowCount()))
         c = self.sp_start.value()
         for r in rows:
             self.table.item(r, 2).setText(f"{c:.6g}")
             c /= self.sp_fac.value()
+
+    def try_accept(self):
+        any_conc = any((self.table.item(i, 2).text() or "").strip() for i in range(self.table.rowCount()))
+        if any_conc and self.cmb_unit.currentData() is None:
+            QMessageBox.warning(self, T("conc_title"), T("unit_missing"))
+            return
+        self.accept()
 
     def overrides(self):
         unit = self.cmb_unit.currentData()
@@ -209,12 +227,7 @@ class MainWindow(QMainWindow):
         self.dragger = None
         self._tasks = []
         self._loading = False
-        self.glob = {"path_length": 1.0, "cutoff": 1.0, "min_points": 3, "bands": "",
-                     "baseline": "series", "bl_a": 1050.0, "bl_b": 1100.0, "ymax": 1.0,
-                     "r2": "legend", "show_err": False, "table": True,
-                     "size": "half_a4", "w_cm": 16.0, "h_cm": 11.0,
-                     "fmt_pdf": True, "fmt_svg": True, "fmt_png": True,
-                     "x_auto": True, "x_min": 200.0, "x_max": 1100.0}
+        self.glob = dict(DEFAULT_GLOB)
 
         self.fig = MplFigure(figsize=FIGSIZE, dpi=PREVIEW_DPI)
         self.canvas = FigureCanvasQTAgg(self.fig)
@@ -244,6 +257,7 @@ class MainWindow(QMainWindow):
         a = QAction(T("act_open"), self, shortcut="Ctrl+O", triggered=self.choose_csv)
         m.addAction(a)
         m.addAction(QAction(T("act_conc"), self, triggered=self.edit_concentrations))
+        m.addAction(QAction(T("act_restart"), self, triggered=self.restart_file))
         m.addAction(QAction(T("act_export"), self, shortcut="Ctrl+E", triggered=self.export_dialog))
         m.addSeparator()
         m.addAction(QAction(T("act_quit"), self, shortcut="Ctrl+Q", triggered=self.close))
@@ -525,8 +539,18 @@ class MainWindow(QMainWindow):
         self.lbl_struct.setText(Path(st["structure"]).name if st and st["structure"] else "–")
         self.lbl_photo.setText(Path(st["photo"]).name if st and st["photo"] else "–")
         self.cmb_bg.setCurrentIndex(self.cmb_bg.findData(st["bg"] if st else "auto"))
-        self.lbl_chem.setText(st.get("chem_info", "") if st else "")
-        self.lbl_chem.setStyleSheet("color: #b35900;" if st and st.get("chem_warn") else "")
+        info = st.get("chem_info", "") if st else ""
+        unit = self.units.get(self.current) if st else None
+        warn = bool(st and st.get("chem_warn"))
+        if unit and unit != "mg/mL":
+            info = (info + "\n" if info else "") + T("mw_unused", u="µM" if unit == "uM" else unit)
+        mw_missing = unit == "mg/mL" and not (st and st["mw"])
+        if mw_missing:
+            info = (info + "\n" if info else "") + T("mw_needed")
+            warn = True
+        self.ed_mw.setStyleSheet("border: 2px solid #d9534f;" if mw_missing else "")
+        self.lbl_chem.setText(info)
+        self.lbl_chem.setStyleSheet("color: #d9534f;" if warn else "")
         pa = st.get("photo_asset") if st else None
         self.lbl_thumb.setPixmap(rgba_to_pixmap(pa["rgba"]) if pa else QPixmap())
         self.sp_struct_w.setValue(st.get("struct_w", 17.0) if st else 17.0)
@@ -643,6 +667,27 @@ class MainWindow(QMainWindow):
         self.log_signal.emit(T("cary_series", name=Path(self.csv_path).name, s=log_names))
         return bool(groups)
 
+    def restart_file(self):
+        """Alle gespeicherten Eingaben zur aktuellen CSV verwerfen und frisch beginnen."""
+        if not self.csv_path:
+            return self.error(T("load_first"))
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            ans = QMessageBox.question(self, T("act_restart").rstrip("…"),
+                                       T("restart_q", name=Path(self.csv_path).name))
+            if ans != QMessageBox.Yes:
+                return False
+        pf = self.project_file()
+        path = self.csv_path
+        self.csv_path = None                      # verhindert, dass open_csv vorher noch speichert
+        try:
+            if pf and pf.exists():
+                pf.unlink()
+        except OSError as e:
+            self.error(str(e))
+        self.glob = dict(DEFAULT_GLOB)
+        self.series, self.conc, self.current = {}, {}, None
+        return self.open_csv(path)
+
     def project_file(self):
         return Path(self.csv_path).with_suffix(".uvvis.yaml") if self.csv_path else None
 
@@ -710,6 +755,7 @@ class MainWindow(QMainWindow):
         except ValueError:
             self.ed_mw.setText("")
             self.series[self.current]["mw"] = None
+        self.apply_series_widgets()                 # Warnung zur Molmasse sofort aktualisieren
         self.timer.start()
 
     # ------------------------------------------------------- Struktur/Foto

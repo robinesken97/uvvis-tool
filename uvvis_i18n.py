@@ -176,6 +176,23 @@ TEXTS = {
     "col_conc": ("Konzentration", "Concentration"),
     "unit": ("Einheit", "Unit"),
     "dil_start": ("Start", "Start"),
+    "unit_choose": ("– bitte wählen –", "– please choose –"),
+    "unit_missing": ("Bitte die Konzentrationseinheit wählen.", "Please choose the concentration unit."),
+    "start_missing": ("Bitte zuerst die Startkonzentration eintragen.", "Please enter the start concentration first."),
+    "act_restart": ("Neu beginnen (Eingaben zu dieser Datei verwerfen)…",
+                    "Start over (discard inputs for this file)…"),
+    "restart_q": ("Alle gespeicherten Eingaben zu „{name}“ verwerfen?\n\n"
+                  "Konzentrationen, Molmassen, Strukturen, Fotos, Einstellungen und Layout werden "
+                  "zurückgesetzt. Die CSV-Datei selbst bleibt unverändert.",
+                  "Discard all saved inputs for “{name}”?\n\n"
+                  "Concentrations, molar masses, structures, photos, settings and layout are reset. "
+                  "The CSV file itself is not changed."),
+    "mw_needed": ("⚠ Keine Molmasse: Ausgabe als a [L g⁻¹ cm⁻¹]. Für ε [M⁻¹ cm⁻¹] Molmasse eintragen "
+                  "oder CDXML laden.",
+                  "⚠ No molar mass: reported as a [L g⁻¹ cm⁻¹]. Enter the molar mass or load a CDXML "
+                  "to get ε [M⁻¹ cm⁻¹]."),
+    "mw_unused": ("Molmasse wird nicht verwendet: Konzentrationen sind in {u} angegeben.",
+                  "Molar mass is not used: concentrations are given in {u}."),
     "dil_factor": ("Faktor", "Factor"),
     "dil_fill": ("Verdünnungsreihe ausfüllen", "Fill dilution series"),
     "dil_hint": ("füllt die markierten Zeilen (oder alle) von oben nach unten: Start, Start/Faktor, …",
