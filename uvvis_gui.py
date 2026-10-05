@@ -1192,7 +1192,7 @@ def make_selftest_inputs(d: Path):
     for i, x in enumerate(wl):
         lines.append("".join(f"{x:.6f},{y[i]:.8f}," for y in cols))
     lines += ["", "TEST-A-1mgml_THF", "Instrument  Cary 60"]
-    (d / "selftest.csv").write_text("\r\n".join(lines), encoding="utf-8")
+    (d / "selftest.csv").write_text("\r\n".join(lines), encoding="utf-8", newline="")
     nodes = [(1, 100, 100, 6), (2, 112.5, 92.8, 6), (3, 125, 100, 6), (4, 125, 114.4, 6),
              (5, 112.5, 121.6, 6), (6, 100, 114.4, 7), (7, 112.5, 78.4, 8)]
     bonds = [(1, 2, 2), (2, 3, 1), (3, 4, 2), (4, 5, 1), (5, 6, 2), (6, 1, 1), (2, 7, 1)]
@@ -1257,7 +1257,7 @@ def selftest(outdir, with_isnet=False):
         n_samples = len([n for n in txt[0].split(",") if n])
         txt[0] = "".join(f"c{i},," for i in range(n_samples))
         plain = out / "input" / "unnamed.csv"
-        plain.write_text("\r\n".join(txt), encoding="utf-8")
+        plain.write_text("\r\n".join(txt), encoding="utf-8", newline="")
         assert w.open_csv(plain, ask=False) is False                 # ohne Angaben: nichts
         w.conc = {f"c{i}": {"conc": 1.0 / 2 ** i, "unit": "mg/mL", "series": "unbenannt"}
                   for i in range(5)}
@@ -1274,7 +1274,7 @@ def selftest(outdir, with_isnet=False):
             f = out / "input" / f"single_{i}.csv"
             f.write_text("\r\n".join([f"{s_['name']},,", "Wavelength (nm),Abs,"] +
                                       [f"{a:.4f},{b:.6f}," for a, b in zip(s_["x"], s_["y"])]),
-                         encoding="utf-8")
+                         encoding="utf-8", newline="")
             singles.append(f)
         assert w.open_files(singles, ask=False) and len(w.groups["TEST-A"]) == 5, w.groups
         magic = b"Varian UV-VIS Spectrophotometer"
@@ -1317,7 +1317,7 @@ def selftest(outdir, with_isnet=False):
         xs = np.arange(400.0, 701.0, 1.0)
         em.write_text("\r\n".join(["EM ex352,,", "Wavelength (nm),Intensity (a.u.),"] +
                                     [f"{x:.1f},{500 * np.exp(-((x - 520) / 30) ** 2):.3f}," for x in xs]),
-                      encoding="utf-8")
+                      encoding="utf-8", newline="")
         w.fl_state.update(abs_file=str(csv), abs_sample="TEST-A-0p25mgml_THF", em_file=str(em),
                           em_sample="EM ex352", ex=352.0, alo=450, ahi=520, eps="1234",
                           photo_day=str(photo), bg_day="grabcut", photo_uv=str(photo), bg_uv="none")
@@ -1328,7 +1328,7 @@ def selftest(outdir, with_isnet=False):
         ecl.write_text("\r\n".join(["Wavelength (nm),Intensity (a.u.),Z Axis,", ",PROBE-1-45p3µM", ",1"] +
                                      [f"{x:g},{300 * np.exp(-((x - 480) / 25) ** 2):.4f}" for x in xs] +
                                      ["", "PROBE-1-45p3µM", "Ex. Wavelength (nm)               387.00"]),
-                       encoding="utf-8")
+                       encoding="utf-8", newline="")
         es = core.read_samples([ecl])
         assert len(es) == 1 and es[0]["name"] == "PROBE-1-45p3µM" and es[0]["ex"] == 387.0, es[0]["name"]
         report.append("overlay + fluorescence + Eclipse CSV: OK")

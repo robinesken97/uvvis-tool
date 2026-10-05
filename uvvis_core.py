@@ -251,7 +251,7 @@ def read_cary_samples(path):
     """Cary-Export: Zeile 1 = Probennamen (je 2 Spalten), danach λ/Abs-Paare.
     -> Liste von dict(key, name, x, y, parsed=(serie, c, einheit) | None)."""
     text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
-    lines = text.splitlines()
+    lines = [ln for ln in text.splitlines() if ln.strip()]      # Leerzeilen (z. B. \r\r\n) ignorieren
     first = lines[0] if lines else ""
     if len(lines) > 1 and "intensity" in first.lower() and lines[1].lstrip().startswith(","):
         # Cary-Eclipse-Export: Zeile 1 Spaltenköpfe, Zeile 2 Probennamen (je 2 Spalten)
