@@ -52,7 +52,13 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
    - **Molar mass:** only needed for concentrations in mg/mL. Filled in automatically from CDXML,
      otherwise enter it by hand. Without it the tool reports the specific absorption coefficient
      *a* in L g⁻¹ cm⁻¹ instead of ε, and the field is marked red. For mM/µM the molar mass is not used.
-4. **Analysis:** set path length, fit cutoff and, if needed, the bands (empty = automatic).
+4. **Analysis:** set path length and fit cutoff. Bands are found automatically; additional bands
+   (e.g. shoulders) can be entered as a list ("in addition to automatically found" keeps both), and
+   **"Find shoulders automatically"** adds shoulders, marked "(sh)".
+   In the results table, the tick next to λ decides whether a band appears in the figure, and a
+   double-click on **"Cutoff A"** sets an own cutoff for that band (e.g. to include a point just
+   above A = 1). Bands with an own cutoff are highlighted; optionally, excluded points are shown as
+   open symbols in the inset.
 5. **Layout:**
    - **Drag** the inset, structure, cuvette and every λ/ε label with the mouse.
    - **Scroll** over the inset or an image to resize it, or use the "Size [% of plot width]" fields.

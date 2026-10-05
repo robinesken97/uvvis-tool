@@ -53,7 +53,13 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
    - **Molmasse:** nur bei Konzentrationen in mg/mL nötig. Wird aus der CDXML übernommen, sonst von
      Hand eintragen. Ohne Molmasse gibt das Tool den spezifischen Absorptionskoeffizienten *a* in
      L g⁻¹ cm⁻¹ statt ε aus, und das Feld wird rot markiert. Bei mM/µM wird die Molmasse nicht verwendet.
-4. **Auswertung:** Schichtdicke, Fit-Cutoff und bei Bedarf die Banden eintragen (leer = automatisch).
+4. **Auswertung:** Schichtdicke und Fit-Cutoff eintragen. Banden werden automatisch gefunden;
+   zusätzliche Banden (z. B. Schultern) lassen sich als Liste eintragen („zusätzlich zu den
+   automatisch gefundenen“ behält beide), und **„Schultern automatisch suchen“** ergänzt Schultern,
+   markiert mit „(sh)“. In der Ergebnistabelle entscheidet das Häkchen bei λ, ob eine Bande im Bild
+   erscheint, und ein Doppelklick auf **„Cutoff A“** setzt einen eigenen Cutoff für diese Bande
+   (z. B. um einen Punkt knapp über A = 1 mitzunehmen). Banden mit eigenem Cutoff sind farbig
+   hinterlegt; optional zeigt das Inset ausgeschlossene Punkte als offene Symbole.
 5. **Layout:**
    - **Mit der Maus ziehen:** Inset, Struktur, Küvette und jedes λ/ε-Label lassen sich verschieben.
    - **Mausrad bzw. Trackpad** über Inset oder Bild ändert die Größe. Alternativ die Felder „Größe [% Plotbreite]“ nutzen.

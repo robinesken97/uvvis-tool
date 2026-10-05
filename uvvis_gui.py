@@ -27,7 +27,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
 from matplotlib.figure import Figure as MplFigure  # noqa: E402
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal  # noqa: E402
-from PySide6.QtGui import QAction, QActionGroup, QIcon, QImage, QPixmap  # noqa: E402
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QPixmap  # noqa: E402
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,  # noqa: E402
                                QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -111,7 +111,8 @@ DEFAULT_GLOB = {"path_length": 1.0, "cutoff": 1.0, "min_points": 3, "bands": "",
                 "r2": "legend", "show_err": False, "table": True,
                 "size": "half_a4", "w_cm": 16.0, "h_cm": 11.0,
                 "fmt_pdf": True, "fmt_svg": True, "fmt_png": True,
-                "x_auto": True, "x_min": 200.0, "x_max": 1100.0}
+                "x_auto": True, "x_min": 200.0, "x_max": 1100.0,
+                "bands_add": True, "shoulders": False, "show_excl": False}
 
 UNITS = [("mM", "mM"), ("uM", "µM"), ("mg/mL", "mg/mL"), ("M", "M")]
 
@@ -361,6 +362,10 @@ class MainWindow(QMainWindow):
         self.ed_bands = QLineEdit()
         self.ed_bands.setPlaceholderText(T("wavelengths_ph"))
         f.addRow(T("wavelengths"), self.ed_bands)
+        self.cb_bands_add = QCheckBox(T("bands_add"))
+        self.cb_shoulders = QCheckBox(T("find_shoulders"))
+        f.addRow(self.cb_bands_add)
+        f.addRow(self.cb_shoulders)
         self.cmb_bl = QComboBox()
         for key in ("series", "simple", "manual", "off"):
             self.cmb_bl.addItem(T({"series": "bl_series", "simple": "bl_simple", "manual": "bl_manual",
@@ -396,6 +401,8 @@ class MainWindow(QMainWindow):
         self.cb_tab = QCheckBox(T("inset_table"))
         f.addRow(self.cb_err)
         f.addRow(self.cb_tab)
+        self.cb_excl = QCheckBox(T("show_excl"))
+        f.addRow(self.cb_excl)
         self.cmb_size = QComboBox()
         for key in ("half_a4", "custom", "std"):
             self.cmb_size.addItem(T({"half_a4": "size_half_a4", "custom": "size_custom",
@@ -444,12 +451,16 @@ class MainWindow(QMainWindow):
         cscroll.setWidget(holder)
         cscroll.setWidgetResizable(True)
         self.tabs = QTabWidget()
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels([T("col_lam"), T("col_n"), T("col_coeff"),
-                                              T("col_intercept"), T("col_r2"), T("col_warn")])
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+                                              T("col_intercept"), T("col_r2"), T("col_cut"), T("col_warn")])
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed
+                                   | QTableWidget.SelectedClicked)
+        self.table.setToolTip(T("cut_tip"))
+        self.table.itemChanged.connect(self.cutoff_edited)
+        self._row_keys = []
         old_log = self.log.toPlainText() if hasattr(self, "log") else ""
         self.log = QPlainTextEdit(readOnly=True)
         self.log.setPlainText(old_log)
@@ -486,7 +497,7 @@ class MainWindow(QMainWindow):
         self.ed_bands.editingFinished.connect(self.changed)
         for w in (self.cmb_bl, self.cmb_r2):
             w.currentIndexChanged.connect(self.changed)
-        for w in (self.cb_err, self.cb_tab):
+        for w in (self.cb_err, self.cb_tab, self.cb_bands_add, self.cb_shoulders, self.cb_excl):
             w.toggled.connect(self.changed)
 
     def apply_globals(self):
@@ -510,6 +521,9 @@ class MainWindow(QMainWindow):
         self.cb_svg.setChecked(gl["fmt_svg"])
         self.cb_png.setChecked(gl["fmt_png"])
         self.cb_xauto.setChecked(gl["x_auto"])
+        self.cb_bands_add.setChecked(gl.get("bands_add", True))
+        self.cb_shoulders.setChecked(gl.get("shoulders", False))
+        self.cb_excl.setChecked(gl.get("show_excl", False))
         self.sp_xmin.setValue(gl["x_min"])
         self.sp_xmax.setValue(gl["x_max"])
         self.sp_xmin.setEnabled(not gl["x_auto"])
@@ -530,6 +544,8 @@ class MainWindow(QMainWindow):
                          w_cm=self.sp_w.value(), h_cm=self.sp_h.value(),
                          fmt_pdf=self.cb_pdf.isChecked(), fmt_svg=self.cb_svg.isChecked(),
                          fmt_png=self.cb_png.isChecked(), x_auto=self.cb_xauto.isChecked(),
+                         bands_add=self.cb_bands_add.isChecked(), shoulders=self.cb_shoulders.isChecked(),
+                         show_excl=self.cb_excl.isChecked(),
                          x_min=self.sp_xmin.value(), x_max=self.sp_xmax.value())
 
     def _update_size_widgets(self):
@@ -683,7 +699,8 @@ class MainWindow(QMainWindow):
             self.series.setdefault(g, {"mw": None, "structure": None, "photo": None, "bg": "auto",
                                        "layout": {}, "structure_asset": None, "photo_asset": None,
                                        "chem_info": "", "chem_warn": False,
-                                       "struct_w": 17.0, "photo_w": 9.0})
+                                       "struct_w": 17.0, "photo_w": 9.0, "band_cutoff": {},
+                                       "band_hidden": []})
         if self.current not in groups:
             self.current = next(iter(groups), None)
         self.cmb_series.blockSignals(True)
@@ -732,7 +749,8 @@ class MainWindow(QMainWindow):
         data = {"global": self.glob,
                 "concentrations": self.conc,
                 "series": {g: {k: st.get(k) for k in ("mw", "structure", "photo", "bg", "layout",
-                                                       "struct_w", "photo_w")}
+                                                       "struct_w", "photo_w", "band_cutoff",
+                                                       "band_hidden")}
                            for g, st in self.series.items()}}
         try:
             pf.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -757,7 +775,8 @@ class MainWindow(QMainWindow):
             if g not in self.series:
                 continue
             st = self.series[g]
-            st.update({k: sd.get(k) or st.get(k) for k in ("mw", "bg", "layout", "struct_w", "photo_w")})
+            st.update({k: sd.get(k) or st.get(k) for k in ("mw", "bg", "layout", "struct_w", "photo_w",
+                                                           "band_cutoff", "band_hidden")})
             st["layout"] = st["layout"] or {}
             if sd.get("structure") and Path(sd["structure"]).exists():
                 self.set_structure(sd["structure"], g, render=False, sync=True, autofill_mw=False)
@@ -946,6 +965,11 @@ class MainWindow(QMainWindow):
         except ValueError:
             bands = []
         cfg["wavelengths_nm"] = bands or "auto"
+        cfg["bands_add_auto"] = gl.get("bands_add", True)
+        cfg["find_shoulders"] = gl.get("shoulders", False)
+        cfg["inset"]["show_excluded"] = gl.get("show_excl", False)
+        cfg["band_cutoff"] = {int(k): float(v) for k, v in (st.get("band_cutoff") or {}).items()}
+        cfg["band_hidden"] = [int(k) for k in (st.get("band_hidden") or [])]
         if gl["baseline"] == "off":
             cfg["baseline_nm"] = None
         elif gl["baseline"] == "manual":
@@ -1059,25 +1083,68 @@ class MainWindow(QMainWindow):
 
     def fill_table(self, results, cfg):
         sym = "ε [M⁻¹ cm⁻¹]" if core.conc_factor(cfg) else "a [L g⁻¹ cm⁻¹]"
+        self.table.blockSignals(True)
         self.table.setHorizontalHeaderLabels([T("col_lam"), T("col_n"), sym, T("col_intercept"),
-                                              T("col_r2"), T("col_warn")])
+                                              T("col_r2"), T("col_cut"), T("col_warn")])
         self.table.setRowCount(len(results))
+        self._row_keys = []
         for i, r in enumerate(results):
             ft = r["fit"]
+            lam = f"{r['lam']:g}" + (" (sh)" if r.get("shoulder") else "")
+            cut = r.get("cutoff", cfg["max_abs_fit"])
             if ft:
                 v, e = core.fmt_ve(r["eps"], r["eps_err"], max_decimals=core.eps_max_decimals(cfg))
                 b, be = core.fmt_ve(ft["intercept"], ft["se_intercept"])
-                cells = [f"{r['lam']:g}", str(ft["n"]), f"{v} ± {e}" if e else v,
-                         f"{b} ± {be}" if be else b, f"{ft['r2']:.5f}", "; ".join(r["warnings"])]
+                cells = [lam, str(ft["n"]), f"{v} ± {e}" if e else v,
+                         f"{b} ± {be}" if be else b, f"{ft['r2']:.5f}", f"{cut:g}", "; ".join(r["warnings"])]
             else:
-                cells = [f"{r['lam']:g}", str(len(r["used"])), "–", "–", "–",
-                         T("no_fit", n=len(r["used"]), cut=cfg["max_abs_fit"], min=cfg["min_fit_points"])]
+                cells = [lam, str(len(r["used"])), "–", "–", "–", f"{cut:g}",
+                         T("no_fit", n=len(r["used"]), cut=cut, min=cfg["min_fit_points"])]
             for j, c in enumerate(cells):
                 it = QTableWidgetItem(c)
-                if j < 5:
+                if j < 6:
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if j == 0:                                   # Häkchen = im Bild anzeigen
+                    it.setFlags((it.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+                    hidden = int(round(r["lam_requested"])) in set(cfg.get("band_hidden") or [])
+                    it.setCheckState(Qt.Unchecked if hidden else Qt.Checked)
+                elif j != 5:
+                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                elif abs(cut - cfg["max_abs_fit"]) > 1e-9:
+                    it.setBackground(QColor("#fff2cc"))
+                    it.setForeground(QColor("#000000"))
                 self.table.setItem(i, j, it)
+            self._row_keys.append(int(round(r["lam_requested"])))
         self.table.resizeColumnsToContents()
+        self.table.blockSignals(False)
+
+    def cutoff_edited(self, item):
+        """Cutoff pro Bande aus der Ergebnistabelle (leer = globaler Cutoff); Häkchen in Spalte λ
+        = Bande im Bild anzeigen."""
+        if not self.current or item.row() >= len(self._row_keys):
+            return
+        if item.column() == 0:
+            st = self.series[self.current]
+            hid = set(st.get("band_hidden") or [])
+            k = self._row_keys[item.row()]
+            hid.discard(k) if item.checkState() == Qt.Checked else hid.add(k)
+            st["band_hidden"] = sorted(hid)
+            QTimer.singleShot(0, self.render)
+            return
+        if item.column() != 5:
+            return
+        key = str(self._row_keys[item.row()])
+        st = self.series[self.current]
+        bc = st.setdefault("band_cutoff", {})
+        try:
+            v = parse_float(item.text())
+        except ValueError:
+            v = None
+        if v is None or abs(v - self.glob["cutoff"]) < 1e-9:
+            bc.pop(key, None)
+        else:
+            bc[key] = v
+        QTimer.singleShot(0, self.render)
 
     # ------------------------------------------------------------ Export
     def export_dialog(self):
@@ -1332,6 +1399,16 @@ def selftest(outdir, with_isnet=False):
         es = core.read_samples([ecl])
         assert len(es) == 1 and es[0]["name"] == "PROBE-1-45p3µM" and es[0]["ex"] == 387.0, es[0]["name"]
         report.append("overlay + fluorescence + Eclipse CSV: OK")
+        # Schultern, Zusatzbande, Cutoff und Ausblenden pro Bande
+        w.open_csv(csv, ask=False)
+        w.glob.update(shoulders=True, bands_add=True, bands="600")
+        w.series["TEST-A"]["band_cutoff"] = {"484": 2.0}
+        w.series["TEST-A"]["band_hidden"] = [600]
+        cfg_t = w.make_cfg("TEST-A")
+        _, _, res_t = core.prepare_series(cfg_t, w.groups["TEST-A"], "TEST-A")
+        lams = {int(round(r["lam_requested"])): r for r in res_t}
+        assert 600 in lams and lams[600].get("hidden") and lams[484]["cutoff"] == 2.0, sorted(lams)
+        report.append("bands/shoulders/cutoff: OK")
         for lang in ("en", "de"):
             w.switch_lang(lang)
         report.append("OK")

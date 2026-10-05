@@ -20,12 +20,18 @@ saved in mM without anyone choosing that unit. Open the file and check **Concent
   also via drag & drop.
 - Structure drawing **unchanged from ChemDraw**: an SVG/PDF/PNG export with the same name next to
   the CDXML is used for the drawing, the CDXML for the molar mass.
+- **Shoulders:** optional automatic search (marked "(sh)"); manually entered bands can be added to
+  the automatically found ones.
+- **Per band:** own fit cutoff (e.g. to include a point just above A = 1) and choice whether the
+  band appears in the figure – both in the results table. Excluded points can be shown as open
+  symbols in the inset.
 - **File → Start over** discards all saved inputs for the current file.
 - Missing molar mass for concentrations in mg/mL is highlighted in red; a note explains when the
   molar mass is not used (mM/µM).
 
 ### Changed
 - ε (M⁻¹ cm⁻¹) is never displayed with decimals.
+- R² appears in the inset legend only if the inset table is not shown (the table already lists it).
 - The molecular formula shows isotopes (e.g. D for deuterium); the molar mass already included them.
 
 ### Fixed

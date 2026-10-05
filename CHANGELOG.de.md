@@ -22,12 +22,18 @@ können in mM gespeichert sein, ohne dass jemand diese Einheit gewählt hat. Dat
   Datensatz, auch per Drag & Drop.
 - Strukturzeichnung **unverändert aus ChemDraw**: Ein gleichnamiger SVG/PDF/PNG-Export neben der
   CDXML wird für die Zeichnung verwendet, die CDXML für die Molmasse.
+- **Schultern:** optionale automatische Suche (markiert mit „(sh)“); manuell eingetragene Banden
+  lassen sich zusätzlich zu den automatisch gefundenen auswerten.
+- **Pro Bande:** eigener Fit-Cutoff (z. B. um einen Punkt knapp über A = 1 mitzunehmen) und Auswahl,
+  ob die Bande im Bild erscheint – beides in der Ergebnistabelle. Ausgeschlossene Punkte lassen sich
+  im Inset als offene Symbole zeigen.
 - **Datei → Neu beginnen** verwirft alle gespeicherten Eingaben zur aktuellen Datei.
 - Fehlende Molmasse bei Konzentrationen in mg/mL wird rot markiert; ein Hinweis erklärt, wenn die
   Molmasse nicht verwendet wird (mM/µM).
 
 ### Geändert
 - ε (M⁻¹ cm⁻¹) wird nie mit Nachkommastellen angezeigt.
+- R² steht nur dann in der Inset-Legende, wenn die Inset-Tabelle nicht angezeigt wird (dort steht es bereits).
 - Die Summenformel zeigt Isotope (z. B. D für Deuterium); die Molmasse hat sie bereits berücksichtigt.
 
 ### Korrigiert

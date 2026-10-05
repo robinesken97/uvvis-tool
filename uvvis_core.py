@@ -66,6 +66,10 @@ DEFAULTS = {
     "wavelengths_nm": "auto",                # Liste oder auto (Peaksuche)
     "peak_range_nm": [230, None],            # Bereich der automatischen Peaksuche
     "peak_min_prominence": 0.05,             # relativ zur Peakhöhe
+    "bands_add_auto": False,                 # Liste in wavelengths_nm zusätzlich zur Automatik
+    "find_shoulders": False,                 # Schultern automatisch suchen
+    "band_cutoff": {},                       # {λ (gerundet): Cutoff A} pro Bande
+    "band_hidden": [],                       # λ (gerundet), die nicht im Bild erscheinen
     "xlim": None,
     "ylim": None,                            # default: [0, max_abs_fit]
     "xlabel": "wavelength [nm]",
@@ -409,8 +413,8 @@ def apply_baseline(spectra, cfg):
     return {"window": (a, b), "offsets": offs.tolist(), "kept_slope": kept}
 
 
-def detect_peaks(spectra, cfg):
-    """Peaksuche auf zusammengesetztem A/c-Spektrum (je λ höchste ungesättigte Konz.)."""
+def _composite(spectra, cfg):
+    """Zusammengesetztes A/c-Spektrum: je λ die höchste ungesättigte Konzentration (geglättet)."""
     xs = np.concatenate([s["x"] for s in spectra])
     lo, hi = cfg["peak_range_nm"]
     lo = max(lo if lo is not None else xs.min(), xs.min())
@@ -424,6 +428,12 @@ def detect_peaks(spectra, cfg):
         comp[ok] = yi[ok] / s["c"]
         aref[ok] = yi[ok]
     comp = np.convolve(np.nan_to_num(comp), np.ones(7) / 7, mode="same")
+    return grid, comp, np.nan_to_num(aref)
+
+
+def detect_peaks(spectra, cfg):
+    """Maxima des zusammengesetzten Spektrums mit Mindest-Prominenz."""
+    grid, comp, aref = _composite(spectra, cfg)
     peaks = []
     n = len(comp)
     for i in range(5, n - 5):
@@ -440,6 +450,40 @@ def detect_peaks(spectra, cfg):
         if prom >= cfg["peak_min_prominence"] * v and aref[i] >= 0.02:
             peaks.append(float(grid[i]))
     return peaks
+
+
+def detect_shoulders(spectra, cfg, peaks, min_dist=18.0, rel_curv=1.5e-4, edge_nm=40.0):
+    """Schultern und schwache Nebenbanden: Minima der 2. Ableitung (stark geglättet) mit
+    deutlicher negativer Krümmung, nicht direkt neben einem gefundenen Maximum und nicht an den
+    verrauschten Datenrändern. Heuristisch – im Zweifel Bande lieber von Hand eintragen."""
+    grid, comp, aref = _composite(spectra, cfg)
+    sm = np.convolve(comp, np.ones(15) / 15, mode="same")
+    d2 = np.gradient(np.gradient(sm))
+    cand = []
+    for i in range(len(sm)):
+        lam = float(grid[i])
+        if lam < grid[0] + edge_nm or lam > grid[-1] - edge_nm:
+            continue
+        if d2[i] >= 0 or d2[i] > d2[max(0, i - 10):i + 11].min() or sm[i] <= 0 or aref[i] < 0.02:
+            continue
+        curv = -d2[i] / sm[i]
+        if curv < rel_curv or any(abs(lam - p) < min_dist for p in peaks):
+            continue
+        cand.append((curv, lam))
+    out = []
+    for curv, lam in sorted(cand, reverse=True):          # stärkste zuerst, Nachbarn verwerfen
+        if all(abs(lam - o) >= min_dist for o in out):
+            out.append(lam)
+    return sorted(out)
+
+
+def is_peak(grid, comp, lam, win=8.0):
+    """True, wenn das zusammengesetzte Spektrum bei λ ein lokales Maximum hat (sonst Schulter)."""
+    sel = np.where(np.abs(grid - lam) <= win)[0]
+    if len(sel) < 3:
+        return True
+    k = sel[np.argmax(comp[sel])]
+    return sel[0] < k < sel[-1]
 
 
 def abs_at(x, y, lam, win):
@@ -520,15 +564,18 @@ def evaluate(cfg, spectra):
                 s = max(cand, key=lambda s: s["c"])
                 sel = (s["x"] >= lam - w) & (s["x"] <= lam + w)
                 lam = float(s["x"][sel][np.argmax(s["y"][sel])])
+        cut = (cfg.get("band_cutoff") or {}).get(int(round(float(lam0))), cfg["max_abs_fit"])
         pts = []
         for s in spectra:
             A = abs_at(s["x"], s["y"], lam, cfg["avg_window_nm"])
-            pts.append((s["c"], A, np.isfinite(A) and A <= cfg["max_abs_fit"]))
+            pts.append((s["c"], A, np.isfinite(A) and A <= cut))
         used = [(c, A) for c, A, ok in pts if ok]
         excl = [(c, A) for c, A, ok in pts if not ok and np.isfinite(A)]
         fit = linfit([c for c, _ in used], [A / d for _, A in used], cfg["fit_intercept"]) \
             if len(used) >= cfg["min_fit_points"] else None
-        r = dict(lam=lam, lam_requested=float(lam0), used=used, excluded=excl, fit=fit)
+        r = dict(lam=lam, lam_requested=float(lam0), used=used, excluded=excl, fit=fit, cutoff=cut)
+        if int(round(float(lam0))) in set(cfg.get("band_hidden") or []):
+            r["hidden"] = True                      # in Tabelle/CSV, aber nicht im Bild
         if fit and fit["r2"] < cfg["min_r2"]:
             log("  " + T("r2_hidden", lam=lam, r2=fit["r2"], min=cfg["min_r2"]))
             r["hidden"] = True
@@ -754,6 +801,8 @@ class Figure:
         icfg = self.cfg["inset"]
         if not icfg["show"]:
             return
+        self._legend_labels = []
+        self._inset_legend = None
         fits = [r for r in self.results if r["fit"] and not r.get("hidden")]
         if not fits:
             return
@@ -765,9 +814,11 @@ class Figure:
         d = self.cfg["path_length_cm"]
         for i, r in enumerate(fits):
             col = cols[i % len(cols)]
-            lbl = f"{r['lam']:g} nm"
-            if self.cfg["r2_mode"] == "legend" and r["fit"]:
-                lbl = f"{r['lam']:g} nm   $R^2$ = {r['fit']['r2']:.4f}"
+            base = f"{r['lam']:g} nm" + (" (sh)" if r.get("shoulder") else "")
+            with_r2 = f"{base}   $R^2$ = {r['fit']['r2']:.4f}" if r["fit"] else base
+            self._legend_labels.append((base, with_r2))
+            # R² nur in der Legende, wenn es nicht schon in der Inset-Tabelle steht
+            lbl = with_r2 if (self.cfg["r2_mode"] == "legend" and not icfg["table"]) else base
             if r["used"]:
                 c, A = np.array(r["used"]).T
                 iax.plot(c, A / d, "s", color=col, ms=max(2.5, 4 * self.cfg.get("scale", 1.0)),
@@ -786,7 +837,7 @@ class Figure:
         iax.tick_params(labelsize=fs * 0.9, direction="out", length=3, pad=1.5)
         iax.set_ylim(bottom=0)
         iax.set_xlim(left=0)
-        iax.legend(fontsize=fs * 0.8, loc="best", frameon=True, fancybox=False,
+        self._inset_legend = iax.legend(fontsize=fs * 0.8, loc="best", frameon=True, fancybox=False,
                    edgecolor="0.3", handletextpad=0.2, borderpad=0.3, labelspacing=0.2,
                    handlelength=1.0)
         if icfg["table"]:
@@ -829,7 +880,8 @@ class Figure:
             v, e = fmt_ve(r["eps"], r["eps_err"], lcfg["eps_digits"], eps_max_decimals(self.cfg))
             eps = f"({v} ± {e})" if (lcfg["show_error"] and e) else v
             sym, unit = coeff_symbol_unit(self.cfg)
-            txt = f"λ =  {r['lam']:g} nm\n{sym} =  {eps} {unit}"
+            sh = " (sh)" if r.get("shoulder") else ""
+            txt = f"λ =  {r['lam']:g} nm{sh}\n{sym} =  {eps} {unit}"
             if self.cfg["r2_mode"] == "label":
                 txt += f"\n$R^2$ =  {r['fit']['r2']:.4f}"
             ann = self.ax.annotate(txt, xy=(r["lam"], 0), xycoords="data",
@@ -928,6 +980,7 @@ class Figure:
                 for f, tab in tries:
                     if not tab and self._inset_table is not None:
                         self._inset_table.set_visible(False)
+                        self._legend_r2(True)          # Tabelle weg -> R² zurück in die Legende
                     self._set_axes_af(iax, 0.5, 0.5, aw * f, ah * f)
                     dx, dy, tw, th = self._axes_tight(iax, rend)
                     hit = fs.find(tw, th, corner_score(icfg["prefer"]))
@@ -940,6 +993,7 @@ class Figure:
                 else:
                     if self._inset_table is not None:
                         self._inset_table.set_visible(icfg["table"])
+                        self._legend_r2(not icfg["table"])
                     self._set_axes_af(iax, 0.5, 0.5, aw, ah)
                     dx, dy, tw, th = self._axes_tight(iax, rend)
                     hit = find("inset", tw, th, corner_score(icfg["prefer"])) or (1 - tw, 1 - th)
@@ -978,6 +1032,13 @@ class Figure:
         for k in warn_over:
             log("  " + T("no_space", key=k))
         self.check_overlaps()
+
+    def _legend_r2(self, on):
+        leg = getattr(self, "_inset_legend", None)
+        if leg is None or self.cfg["r2_mode"] != "legend":
+            return
+        for txt, (base, with_r2) in zip(leg.get_texts(), self._legend_labels):
+            txt.set_text(with_r2 if on else base)
 
     def _axes_tight(self, a, rend):
         p = a.get_position()
@@ -1278,10 +1339,18 @@ def prepare_series(cfg, spectra, tag=""):
         hi = min(hi if hi is not None else np.inf, max(cfg["xlim"]))
     cfg["peak_range_nm"] = [None if lo in (None, -np.inf) else float(lo),
                             None if hi in (None, np.inf) else float(hi)]
-    if cfg["wavelengths_nm"] in ("auto", None, []):
-        cfg["wavelengths_nm"] = detect_peaks(spectra, cfg)
-        log("  " + T("peaks_found", l=", ".join(f"{l_:g}" for l_ in cfg["wavelengths_nm"])))
+    manual = [] if cfg["wavelengths_nm"] in ("auto", None, []) else [float(v) for v in cfg["wavelengths_nm"]]
+    auto = []
+    if not manual or cfg.get("bands_add_auto"):
+        auto = detect_peaks(spectra, cfg)
+        if cfg.get("find_shoulders"):
+            auto += detect_shoulders(spectra, cfg, auto)
+        log("  " + T("peaks_found", l=", ".join(f"{l_:g}" for l_ in sorted(auto)) or "–"))
+    cfg["wavelengths_nm"] = sorted(manual + [a for a in auto if all(abs(a - m) > 5 for m in manual)])
     results = evaluate(cfg, spectra)
+    grid, comp, _ = _composite(spectra, cfg)
+    for r in results:
+        r["shoulder"] = not is_peak(grid, comp, r["lam"])
     print_results(results, cfg)
     return cfg, spectra, results
 
