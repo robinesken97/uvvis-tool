@@ -1,4 +1,4 @@
-[English](README.md) | **Deutsch**
+[English](README.md) | **Deutsch** · [Änderungen](CHANGELOG.de.md)
 
 # UVVisTool – UV-Vis-Auswertung von Verdünnungsreihen
 
@@ -32,7 +32,9 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
    `ABC-1-0p5mgml_THF` → Serie `ABC-1`, 0,5 mg/mL. Erkannt werden
    `mgml`/`mg_ml`/`mg/ml`, `mM`, `uM`/`µM`; `p` steht für das Dezimalkomma.
    - Stehen keine Konzentrationen im Namen (z. B. `c0` … `c4`), öffnet sich eine Tabelle zum Eintragen.
+     Die **Einheit** (mM, µM, mg/mL, M) muss ausdrücklich gewählt werden, es ist nichts vorbelegt.
    - „Verdünnungsreihe ausfüllen“ setzt in die markierten Zeilen (oder alle) von oben nach unten Start, Start/Faktor, … ein.
+     Der Startwert gehört immer zur **obersten** markierten Zeile (meist die Stammlösung).
    - Proben ohne Wert, z. B. eine Blindprobe, werden ignoriert.
    - Über die Spalte „Serie“ lassen sich mehrere Verbindungen in einer Datei trennen.
    - Später ändern geht über den Knopf **Konzentrationen…**.
@@ -41,8 +43,9 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
      berechnet**, die Summenformel wird zur Kontrolle angezeigt.
    - **Küvettenfoto:** HEIC (iPhone), JPG, PNG und weitere. Der Hintergrund wird automatisch entfernt.
      Beim ersten Mal bietet die App einen einmaligen Download des KI-Modells an (~180 MB).
-   - **Molmasse:** wird aus der CDXML übernommen, sonst von Hand eintragen. Bleibt das Feld leer, gibt
-     das Tool den spezifischen Absorptionskoeffizienten *a* in L g⁻¹ cm⁻¹ statt ε aus.
+   - **Molmasse:** nur bei Konzentrationen in mg/mL nötig. Wird aus der CDXML übernommen, sonst von
+     Hand eintragen. Ohne Molmasse gibt das Tool den spezifischen Absorptionskoeffizienten *a* in
+     L g⁻¹ cm⁻¹ statt ε aus, und das Feld wird rot markiert. Bei mM/µM wird die Molmasse nicht verwendet.
 4. **Auswertung:** Schichtdicke, Fit-Cutoff und bei Bedarf die Banden eintragen (leer = automatisch).
 5. **Layout:**
    - **Mit der Maus ziehen:** Inset, Struktur, Küvette und jedes λ/ε-Label lassen sich verschieben.
@@ -52,7 +55,8 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
    und `<name>_results.csv` für **alle** Serien in einen wählbaren Ordner.
 
 Einstellungen, Konzentrationen und Layouts werden neben der CSV in `<name>.uvvis.yaml` gespeichert
-und beim nächsten Öffnen wiederhergestellt.
+und beim nächsten Öffnen wiederhergestellt. **Datei → Neu beginnen** verwirft all das für die aktuelle
+Datei und startet von vorn (die CSV selbst bleibt unverändert).
 
 **Sprache:** Menü **Sprache** → Deutsch / English. Die Umstellung gilt sofort. Auf dem Mac steht das
 Menü in der Menüleiste oben am Bildschirm, nicht im Fenster. Die Achsenbeschriftungen der Abbildungen
@@ -151,3 +155,15 @@ python build.py                        # App bauen -> dist/
 
 **Datenschutz:** Die `.gitignore` schließt CSV-, HEIC- und CDXML-Dateien aus, damit keine
 unveröffentlichten Messdaten im Repository landen.
+
+## Lizenz
+
+UVVisTool steht unter der **GNU Affero General Public License v3.0** (siehe `LICENSE`).
+Es gibt keine Gewährleistung.
+
+Die App enthält folgende Bibliotheken unter ihren eigenen Lizenzen:
+PySide6/Qt (LGPL-3.0), PyMuPDF (AGPL-3.0), RDKit (BSD-3-Clause), matplotlib (Matplotlib License),
+NumPy (BSD-3-Clause), Pillow (MIT-CMU), pillow-heif (BSD-3-Clause, enthält libheif, LGPL-3.0),
+OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT).
+Das ISNet-Modell für die Freistellung (Apache-2.0) wird beim ersten Gebrauch aus dem
+rembg-Projekt heruntergeladen und ist nicht Teil dieses Repositorys.

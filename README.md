@@ -1,4 +1,4 @@
-**English** | [Deutsch](README.de.md)
+**English** | [Deutsch](README.de.md) · [Changelog](CHANGELOG.md)
 
 # UVVisTool – UV-Vis analysis of dilution series
 
@@ -32,7 +32,9 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
    `ABC-1-0p5mgml_THF` → series `ABC-1`, 0.5 mg/mL. Recognised units are
    `mgml`/`mg_ml`/`mg/ml`, `mM`, `uM`/`µM`; `p` stands for the decimal point.
    - If the names contain no concentrations (e.g. `c0` … `c4`), a table opens where you enter them.
+     Choose the **unit** explicitly (mM, µM, mg/mL, M) – nothing is pre-selected.
    - "Fill dilution series" fills the selected rows (or all of them) with start, start/factor, … from top to bottom.
+     The start value always belongs to the **top** selected row (usually the stock solution).
    - Samples without a value, e.g. a blank, are ignored.
    - The "Series" column lets you split several compounds within one file.
    - You can change the values later with the **Concentrations…** button.
@@ -41,8 +43,9 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
      automatically. The formula is shown for checking.
    - **Cuvette photo:** HEIC (iPhone), JPG, PNG and more. The background is removed automatically.
      On first use the app offers a one-time download (~180 MB) of the AI model.
-   - **Molar mass:** filled in automatically from CDXML, otherwise enter it by hand. If left empty, the
-     tool reports the specific absorption coefficient *a* in L g⁻¹ cm⁻¹ instead of ε.
+   - **Molar mass:** only needed for concentrations in mg/mL. Filled in automatically from CDXML,
+     otherwise enter it by hand. Without it the tool reports the specific absorption coefficient
+     *a* in L g⁻¹ cm⁻¹ instead of ε, and the field is marked red. For mM/µM the molar mass is not used.
 4. **Analysis:** set path length, fit cutoff and, if needed, the bands (empty = automatic).
 5. **Layout:**
    - **Drag** the inset, structure, cuvette and every λ/ε label with the mouse.
@@ -52,7 +55,8 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
    `<name>_results.csv` for **all** series into a folder of your choice.
 
 Settings, concentrations and layouts are stored next to the CSV in `<name>.uvvis.yaml` and
-restored the next time you open the file.
+restored the next time you open the file. **File → Start over** discards all of them for the current
+file and begins from scratch (the CSV itself is not changed).
 
 **Language:** menu **Language** → Deutsch / English. The change takes effect immediately.
 On macOS the menu is in the menu bar at the top of the screen, not in the window.
@@ -151,3 +155,15 @@ python build.py                        # build the app -> dist/
 
 **Data protection:** `.gitignore` excludes CSV, HEIC and CDXML files so that no unpublished
 measurement data ends up in the repository.
+
+## License
+
+UVVisTool is licensed under the **GNU Affero General Public License v3.0** (see `LICENSE`).
+It comes without any warranty.
+
+The app bundles the following libraries under their own licenses:
+PySide6/Qt (LGPL-3.0), PyMuPDF (AGPL-3.0), RDKit (BSD-3-Clause), matplotlib (Matplotlib License),
+NumPy (BSD-3-Clause), Pillow (MIT-CMU), pillow-heif (BSD-3-Clause, contains libheif, LGPL-3.0),
+OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT).
+The ISNet model for background removal (Apache-2.0) is downloaded on first use from the
+rembg project and is not part of this repository.
