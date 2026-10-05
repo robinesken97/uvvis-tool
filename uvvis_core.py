@@ -156,6 +156,11 @@ def apply_export_size(cfg, w_cm, h_cm):
     return cfg
 
 
+def eps_max_decimals(cfg):
+    """ε in M⁻¹ cm⁻¹ grundsätzlich ganzzahlig; spezifisches a (L g⁻¹ cm⁻¹) normal gerundet."""
+    return 0 if conc_factor(cfg) else None
+
+
 def coeff_symbol_unit(cfg):
     if conc_factor(cfg) is None:
         return "a", r"L g$^{-1}$ cm$^{-1}$"
@@ -245,8 +250,15 @@ def parse_sample_name(name):
 def read_cary_samples(path):
     """Cary-Export: Zeile 1 = Probennamen (je 2 Spalten), danach λ/Abs-Paare.
     -> Liste von dict(key, name, x, y, parsed=(serie, c, einheit) | None)."""
-    first = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()[0]
-    names = [n.strip() for n in first.split(",")[0::2]]
+    text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    lines = text.splitlines()
+    first = lines[0] if lines else ""
+    if len(lines) > 1 and "intensity" in first.lower() and lines[1].lstrip().startswith(","):
+        # Cary-Eclipse-Export: Zeile 1 Spaltenköpfe, Zeile 2 Probennamen (je 2 Spalten)
+        names = [n.strip() for n in lines[1].split(",")[1::2]]
+    else:
+        names = [n.strip() for n in first.split(",")[0::2]]
+    ex_list = [float(v) for v in _EX_RE.findall(text)]
     arr = read_table(path)
     samples, seen = [], {}
     for k, name in enumerate(names):
@@ -258,8 +270,57 @@ def read_cary_samples(path):
         x, y = _clean_xy(arr[:, 2 * k], arr[:, 2 * k + 1])
         if len(x) < 5:
             continue
-        samples.append({"key": key, "name": name, "x": x, "y": y, "parsed": parse_sample_name(name)})
+        samples.append({"key": key, "name": name, "x": x, "y": y, "parsed": parse_sample_name(name),
+                        "ex": ex_list[k] if k < len(ex_list) else None})
     return samples
+
+
+_EX_RE = re.compile(r"Ex\. Wavelength \(nm\)\s+([\d.]+)")
+BINARY_EXT = {".dsw", ".bsw", ".spc", ".fbsw", ".fdsw"}
+_HEADERISH = re.compile(r"^(#?\d*|wave.*|.*\(nm\).*|abs.*|nm|x|y)$", re.I)
+
+
+def read_binary_samples(path):
+    """Cary WinUV .DSW/.BSW (und Shimadzu .SPC) über den mitgelieferten parseuv-Parser."""
+    from parseuv_lite import CaryFile
+    cf = CaryFile(str(path))
+    raw = Path(path).read_bytes().decode("cp1252", errors="replace")
+    ex_list = [float(v) for v in _EX_RE.findall(raw)]
+    out = []
+    spectra = [sp for sp in cf.spectra if not sp.title.lower().startswith("baseline")]  # Gerätebasislinien
+    for k, sp in enumerate(spectra):
+        x, y = _clean_xy(np.asarray(sp.wavelengths, float), np.asarray(sp.absorbances, float))
+        if len(x) >= 5:
+            out.append({"key": sp.title, "name": sp.title, "x": x, "y": y,
+                        "parsed": parse_sample_name(sp.title),
+                        "ex": ex_list[k] if len(ex_list) == len(spectra) else
+                        (ex_list[0] if len(set(ex_list)) == 1 else None)})
+    return out
+
+
+def read_samples(paths):
+    """Eine oder mehrere Dateien (Cary-CSV/TXT, .DSW, .BSW) -> gemeinsame Probenliste.
+    Bei mehreren Dateien wird der Dateiname vorangestellt, damit Schlüssel eindeutig bleiben."""
+    paths = [Path(p) for p in (paths if isinstance(paths, (list, tuple)) else [paths])]
+    allsamples = []
+    for p in paths:
+        smp = read_binary_samples(p) if p.suffix.lower() in BINARY_EXT else read_cary_samples(p)
+        if len(smp) == 1 and (not smp[0]["parsed"]) and _HEADERISH.match(smp[0]["name"].strip()):
+            smp[0]["name"] = smp[0]["key"] = p.stem       # Einzelmessung ohne sinnvollen Namen
+            smp[0]["parsed"] = parse_sample_name(p.stem)
+        for s_ in smp:
+            if len(paths) > 1:
+                s_["key"] = f"{p.stem}: {s_['name']}"
+            else:
+                s_["key"] = s_.get("key") or s_["name"]
+            s_["file"] = str(p)
+        allsamples += smp
+    seen = {}
+    for s_ in allsamples:                                  # verbleibende Doppelungen
+        seen[s_["key"]] = seen.get(s_["key"], 0) + 1
+        if seen[s_["key"]] > 1:
+            s_["key"] = f"{s_['key']} ({seen[s_['key']]})"
+    return allsamples
 
 
 def group_samples(samples, overrides=None, default_series="serie"):
@@ -289,7 +350,7 @@ def group_samples(samples, overrides=None, default_series="serie"):
 
 
 def load_cary(path):
-    groups, _, missing = group_samples(read_cary_samples(path), default_series=Path(path).stem)
+    groups, _, missing = group_samples(read_samples([path]), default_series=Path(path).stem)
     for k in missing:
         log("  " + T("no_conc_in_name", name=k))
     return groups
@@ -434,8 +495,11 @@ def _decimals_for(v, e, digits):
     return n - 1 - math.floor(math.log10(abs(v)))
 
 
-def fmt_ve(v, e=None, digits="auto"):
+def fmt_ve(v, e=None, digits="auto", max_decimals=None):
+    """Wert ± Fehler, gerundet nach Unsicherheit. max_decimals=0: nie Nachkommastellen (ε)."""
     d = _decimals_for(v, e, digits)
+    if max_decimals is not None:
+        d = min(d, max_decimals)
     vs = f"{round(v, d):.{max(d, 0)}f}"
     es = f"{round(e, d):.{max(d, 0)}f}" if (e is not None and np.isfinite(e)) else None
     return vs.replace("-", "\u2212"), es
@@ -508,7 +572,7 @@ def print_results(results, cfg):
             log(f"{r['lam']:7.1f}   –  " + T("no_fit", n=len(r["used"]), cut=cfg["max_abs_fit"],
                                                 min=cfg["min_fit_points"]))
             continue
-        v, e = fmt_ve(r["eps"], r["eps_err"])
+        v, e = fmt_ve(r["eps"], r["eps_err"], max_decimals=eps_max_decimals(cfg))
         b, be = fmt_ve(ft["intercept"], ft["se_intercept"])
         eps_s = f"{v} ± {e}" if e else v
         b_s = f"{b} ± {be}" if be else b
@@ -762,7 +826,7 @@ class Figure:
         for r in self.results:
             if not r["fit"] or r.get("hidden") or not (lo <= r["lam"] <= hi):
                 continue
-            v, e = fmt_ve(r["eps"], r["eps_err"], lcfg["eps_digits"])
+            v, e = fmt_ve(r["eps"], r["eps_err"], lcfg["eps_digits"], eps_max_decimals(self.cfg))
             eps = f"({v} ± {e})" if (lcfg["show_error"] and e) else v
             sym, unit = coeff_symbol_unit(self.cfg)
             txt = f"λ =  {r['lam']:g} nm\n{sym} =  {eps} {unit}"
@@ -1045,6 +1109,9 @@ class Dragger:
         return None
 
     def _over_label(self, ev):
+        leg = getattr(self.F, "legend", None)
+        if leg is not None and leg.contains(ev)[0]:
+            return True
         return any(a.contains(ev)[0] for a in self.F.ann_items.values())
 
     def _set_cursor(self, kind):
@@ -1184,9 +1251,10 @@ def make_demo(d: Path):
 # API für GUI und Kommandozeile
 # ----------------------------------------------------------------------------
 def load_series(path, overrides=None):
-    """Datei -> ({serie: [spektren]}, {serie: einheit}, [proben ohne Konzentration])."""
-    groups, units, missing = group_samples(read_cary_samples(path), overrides, Path(path).stem)
-    log(T("cary_series", name=Path(path).name, s=", ".join(groups) or "–"))
+    """Datei(en) -> ({serie: [spektren]}, {serie: einheit}, [proben ohne Konzentration])."""
+    paths = path if isinstance(path, (list, tuple)) else [path]
+    groups, units, missing = group_samples(read_samples(paths), overrides, Path(paths[0]).stem)
+    log(T("cary_series", name=", ".join(Path(p).name for p in paths), s=", ".join(groups) or "–"))
     return groups, units, missing
 
 

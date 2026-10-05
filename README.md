@@ -27,7 +27,9 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
 
 ## Workflow
 
-1. **Open data:** File → Open CSV, or drag the CSV onto the window.
+1. **Open data:** File → Open, or drag files onto the window. Cary CSV/TXT exports and the
+   instrument's own **.DSW/.BSW** files are supported. **Several files at once** (e.g. each
+   concentration measured separately) are combined into one data set.
 2. **Concentrations:** Concentrations are read from the sample names, e.g.
    `ABC-1-0p5mgml_THF` → series `ABC-1`, 0.5 mg/mL. Recognised units are
    `mgml`/`mg_ml`/`mg/ml`, `mM`, `uM`/`µM`; `p` stands for the decimal point.
@@ -40,7 +42,11 @@ On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does n
    - You can change the values later with the **Concentrations…** button.
 3. **Compound (per series):**
    - **Structure:** CDXML, SVG, PDF or an image file. With CDXML the **molar mass is calculated**
-     automatically. The formula is shown for checking.
+     automatically (isotopes such as D included); the formula is shown for checking. For the
+     drawing to look **exactly as in ChemDraw**, also save the structure from ChemDraw as SVG, PDF
+     or PNG with the same name next to the CDXML (e.g. `6g.cdxml` + `6g.svg`): the drawing is then
+     taken unchanged from that file and the molar mass from the CDXML. Without such a file the
+     drawing is regenerated (ACS 1996 style) and may differ from ChemDraw.
    - **Cuvette photo:** HEIC (iPhone), JPG, PNG and more. The background is removed automatically.
      On first use the app offers a one-time download (~180 MB) of the AI model.
    - **Molar mass:** only needed for concentrations in mg/mL. Filled in automatically from CDXML,
@@ -61,6 +67,36 @@ file and begins from scratch (the CSV itself is not changed).
 **Language:** menu **Language** → Deutsch / English. The change takes effect immediately.
 On macOS the menu is in the menu bar at the top of the screen, not in the window.
 Axis labels in the figures are always English.
+
+## Overlay tab
+
+Compare several spectra in one figure, measured and calculated:
+
+- **Measurement…** adds spectra from CSV/TXT/DSW/BSW files (one entry per sample);
+  **TD-DFT…** adds ORCA (4–6) or Gaussian output files.
+- TD-DFT transitions are broadened with Gaussians in energy (FWHM and an empirical energy shift
+  can be set per calculation, default 0.3 eV); ε follows from the oscillator strengths
+  (ε(ν̃) = 1.306·10⁸ · Σ f/σ · exp(−((ν̃−ν̃ᵢ)/σ)²), as in GaussView). Transitions can be shown as sticks.
+- **y axis:** *normalised to band* – every spectrum is scaled to its maximum within the
+  normalisation range (globally or per spectrum, e.g. if the calculated band is shifted), or
+  **ε [10³ M⁻¹ cm⁻¹]** – measured spectra then need concentration (and molar mass for mg/mL) and
+  path length.
+- Colours and names in the table; the legend can be dragged.
+
+## Fluorescence tab
+
+Absorption and emission in one figure, as commonly shown in papers:
+
+- Absorption (any UV-Vis file) and emission (Cary Eclipse CSV or .FBSW), both normalised to 1;
+  λex is filled in automatically from the emission file;
+  the absorption to the maximum within the "band of interest".
+- Labels with λ of the absorption maximum (plus ε, if entered) and λem of the emission maximum.
+- Optionally hide scattered light at λex and 2·λex.
+- Two cuvette photos (daylight and under UV) are combined with an arrow and the excitation
+  wavelength; for the UV photo background removal is off by default (dark background stays).
+- Structure as in the ε tab.
+
+Overlay and fluorescence set-ups are kept between sessions and can be saved/loaded as files.
 
 ## Figure size for Word
 
@@ -87,15 +123,16 @@ looks identical everywhere but cannot be edited in Word.
   uses the full data range, independent of the displayed λ range.
 - **Fit cutoff:** points above the cutoff (default A = 1.0) are excluded from the fit.
 - **Bands:** found automatically within the displayed λ range, or entered as a list.
-- **Rounding:** ε is rounded according to its standard error.
+- **Rounding:** ε (M⁻¹ cm⁻¹) is never shown with decimals; it is rounded to the precision its
+  standard error supports. The results CSV keeps the full values.
 - **Warnings** (results table and log): fewer than 4 fit points, significant intercept (> 2σ),
   R² < 0.98 (then not shown in the figure), fewer than 3 points (then no ε at all).
 
 ## Notes on CDXML
 
-- The orientation of the structure is preserved as in ChemDraw. It is redrawn in ACS 1996 style
-  via RDKit. For the exact ChemDraw appearance export SVG or PDF from ChemDraw. If a `.cdxml` with
-  the same name sits next to it, the molar mass is taken from that file.
+- Exact ChemDraw appearance: put an SVG/PDF/PNG export with the same name next to the CDXML (see
+  above). Otherwise the structure is redrawn via RDKit with the orientation preserved, but labels
+  such as CD₃ or N₂ may be drawn differently (e.g. as explicit atoms).
 - Molar mass = sum of all fragments (counter-ions are included).
 - If abbreviations such as Dipp or Mes cannot be resolved, **no** molar mass is set and a warning is
   shown. Please enter it by hand in that case.
@@ -103,9 +140,16 @@ looks identical everywhere but cannot be edited in Word.
 
 ## Supported data
 
-Cary multi-sample exports (Agilent Cary 60 and others): first row = sample names, second row =
-`Wavelength (nm),Abs` per sample, followed by the data. Decimal comma and point are both recognised,
-and the instrument metadata at the end of the file is ignored.
+- **Cary CSV/TXT exports** (Agilent Cary 60 and others): first row = sample names, second row =
+  `Wavelength (nm),Abs` per sample, followed by the data. Decimal comma and point are both
+  recognised, and the instrument metadata at the end of the file is ignored. Simple two-column
+  files work too; the file name is then used as the sample name.
+- **Cary WinUV .DSW / .BSW** (binary files from the instrument software), read with the parser
+  from the open-source project [parseuv](https://pypi.org/project/parseuv/). Instrument baseline
+  records ("Baseline 100%T/0%T") in batch files are skipped.
+- **Cary Eclipse** fluorescence data: CSV export and .FBSW files. The excitation wavelength is
+  taken from the file's metadata.
+- **Several files** can be opened together; they form one data set.
 
 ## Troubleshooting
 
@@ -164,6 +208,8 @@ It comes without any warranty.
 The app bundles the following libraries under their own licenses:
 PySide6/Qt (LGPL-3.0), PyMuPDF (AGPL-3.0), RDKit (BSD-3-Clause), matplotlib (Matplotlib License),
 NumPy (BSD-3-Clause), Pillow (MIT-CMU), pillow-heif (BSD-3-Clause, contains libheif, LGPL-3.0),
-OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT).
+OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT), olefile (BSD-2-Clause).
+The reader for .DSW/.BSW files in `parseuv_lite/` is taken from parseuv 1.0.4
+(© 2026 Ricardo J. Fernández-Terán, BSD-3-Clause, see `parseuv_lite/LICENSE`).
 The ISNet model for background removal (Apache-2.0) is downloaded on first use from the
 rembg project and is not part of this repository.

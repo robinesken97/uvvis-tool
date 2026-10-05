@@ -18,6 +18,8 @@ args = [
     "--collect-all", "pymupdf",
     "--collect-all", "pillow_heif",
     "--collect-all", "onnxruntime",
+    "--hidden-import", "parseuv_lite",
+    "--hidden-import", "olefile",
     "--hidden-import", "matplotlib.backends.backend_qtagg",
     "--hidden-import", "matplotlib.backends.backend_agg",
     "--hidden-import", "matplotlib.backends.backend_pdf",

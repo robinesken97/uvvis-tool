@@ -27,7 +27,9 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
 
 ## Ablauf
 
-1. **Daten öffnen:** Datei → CSV öffnen, oder die CSV ins Fenster ziehen.
+1. **Daten öffnen:** Datei → Öffnen, oder Dateien ins Fenster ziehen. Unterstützt werden
+   Cary-CSV/TXT-Exporte und die gerätenahen **.DSW/.BSW**-Dateien. **Mehrere Dateien auf einmal**
+   (z. B. jede Konzentration einzeln gemessen) werden zu einem Datensatz zusammengeführt.
 2. **Konzentrationen:** Die Konzentrationen werden aus den Probennamen gelesen, z. B.
    `ABC-1-0p5mgml_THF` → Serie `ABC-1`, 0,5 mg/mL. Erkannt werden
    `mgml`/`mg_ml`/`mg/ml`, `mM`, `uM`/`µM`; `p` steht für das Dezimalkomma.
@@ -40,7 +42,12 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
    - Später ändern geht über den Knopf **Konzentrationen…**.
 3. **Verbindung (je Serie):**
    - **Struktur:** CDXML, SVG, PDF oder eine Bilddatei. Bei CDXML wird die **Molmasse automatisch
-     berechnet**, die Summenformel wird zur Kontrolle angezeigt.
+     berechnet** (Isotope wie D eingeschlossen), die Summenformel wird zur Kontrolle angezeigt.
+     Damit die Zeichnung **exakt wie in ChemDraw** aussieht, die Struktur in ChemDraw zusätzlich
+     als SVG, PDF oder PNG mit gleichem Namen neben die CDXML speichern (z. B. `6g.cdxml` +
+     `6g.svg`). Die Zeichnung kommt dann unverändert aus dieser Datei, die Molmasse aus der CDXML.
+     Ohne eine solche Datei wird die Struktur neu gezeichnet (ACS-1996-Stil) und kann von ChemDraw
+     abweichen.
    - **Küvettenfoto:** HEIC (iPhone), JPG, PNG und weitere. Der Hintergrund wird automatisch entfernt.
      Beim ersten Mal bietet die App einen einmaligen Download des KI-Modells an (~180 MB).
    - **Molmasse:** nur bei Konzentrationen in mg/mL nötig. Wird aus der CDXML übernommen, sonst von
@@ -61,6 +68,38 @@ Datei und startet von vorn (die CSV selbst bleibt unverändert).
 **Sprache:** Menü **Sprache** → Deutsch / English. Die Umstellung gilt sofort. Auf dem Mac steht das
 Menü in der Menüleiste oben am Bildschirm, nicht im Fenster. Die Achsenbeschriftungen der Abbildungen
 sind immer englisch.
+
+## Overlay-Tab
+
+Mehrere Spektren in einer Abbildung vergleichen, gemessen und berechnet:
+
+- **Messung…** fügt Spektren aus CSV/TXT/DSW/BSW-Dateien hinzu (ein Eintrag pro Probe);
+  **TD-DFT…** fügt Ausgabedateien von ORCA (4–6) oder Gaussian hinzu.
+- TD-DFT-Übergänge werden mit Gaußfunktionen in der Energie verbreitert (Breite FWHM und eine
+  empirische Energieverschiebung pro Rechnung einstellbar, Standard 0,3 eV); ε folgt aus den
+  Oszillatorstärken (ε(ν̃) = 1,306·10⁸ · Σ f/σ · exp(−((ν̃−ν̃ᵢ)/σ)²), wie in GaussView). Übergänge
+  lassen sich als Striche anzeigen.
+- **y-Achse:** *normiert auf Bande* – jedes Spektrum wird auf sein Maximum im Normierungsbereich
+  skaliert (global oder pro Spektrum, z. B. wenn die berechnete Bande verschoben ist), oder
+  **ε [10³ M⁻¹ cm⁻¹]** – gemessene Spektren brauchen dann Konzentration (bei mg/mL auch Molmasse)
+  und Schichtdicke.
+- Farben und Namen in der Tabelle; die Legende lässt sich verschieben.
+
+## Fluoreszenz-Tab
+
+Absorption und Emission in einer Abbildung, wie in Publikationen üblich:
+
+- Absorption (beliebige UV-Vis-Datei) und Emission (Cary-Eclipse-CSV oder .FBSW), λex wird aus der
+  Emissionsdatei übernommen; beide auf 1
+  normiert; die Absorption auf das Maximum in der „Bande von Interesse“.
+- Labels mit λ des Absorptionsmaximums (plus ε, wenn eingetragen) und λem des Emissionsmaximums.
+- Streulicht bei λex und 2·λex optional ausblenden.
+- Zwei Küvettenfotos (Tageslicht und unter UV) werden mit Pfeil und Anregungswellenlänge
+  kombiniert; beim UV-Foto ist die Freistellung standardmäßig aus (dunkler Hintergrund bleibt).
+- Struktur wie im ε-Tab.
+
+Overlay- und Fluoreszenz-Einstellungen bleiben zwischen den Sitzungen erhalten und lassen sich
+als Datei speichern und laden.
 
 ## Abbildungsgröße für Word
 
@@ -87,15 +126,16 @@ In PDF und SVG bleibt die Struktur eine Vektorgrafik. Text steht im SVG als Pfad
   Die Basislinie nutzt immer den vollen Datenbereich, unabhängig vom dargestellten λ-Bereich.
 - **Fit-Cutoff:** Punkte oberhalb des Cutoffs (Standard A = 1,0) gehen nicht in den Fit ein.
 - **Banden:** automatisch im dargestellten λ-Bereich gesucht oder als Liste vorgegeben.
-- **Rundung:** ε wird nach seiner Standardabweichung gerundet.
+- **Rundung:** ε (M⁻¹ cm⁻¹) erscheint nie mit Nachkommastellen; gerundet wird auf die Genauigkeit,
+  die sein Standardfehler hergibt. Die Ergebnis-CSV enthält die vollen Werte.
 - **Warnungen** (Ergebnistabelle und Protokoll): weniger als 4 Fitpunkte, signifikanter
   Achsenabschnitt (> 2σ), R² < 0,98 (dann nicht im Bild), weniger als 3 Punkte (dann gar kein ε).
 
 ## Hinweise zu CDXML
 
-- Die Orientierung der Struktur bleibt wie in ChemDraw. Gezeichnet wird im ACS-1996-Stil über RDKit.
-  Für das exakte ChemDraw-Aussehen SVG oder PDF aus ChemDraw exportieren. Liegt daneben eine
-  gleichnamige `.cdxml`, wird die Molmasse aus dieser Datei berechnet.
+- Exaktes ChemDraw-Aussehen: einen SVG/PDF/PNG-Export mit gleichem Namen neben die CDXML legen
+  (siehe oben). Sonst wird die Struktur über RDKit neu gezeichnet. Die Orientierung bleibt, Labels
+  wie CD₃ oder N₂ können aber anders aussehen (z. B. als einzelne Atome).
 - Molmasse = Summe aller Fragmente (Gegenionen zählen mit).
 - Lassen sich Abkürzungen wie Dipp oder Mes nicht auflösen, wird **keine** Molmasse gesetzt und eine
   Warnung angezeigt. Dann bitte die Molmasse von Hand eintragen.
@@ -103,9 +143,16 @@ In PDF und SVG bleibt die Struktur eine Vektorgrafik. Text steht im SVG als Pfad
 
 ## Unterstützte Daten
 
-Cary-Mehrprobenexporte (Agilent Cary 60 u. a.): erste Zeile = Probennamen, zweite Zeile =
-`Wavelength (nm),Abs` je Probe, danach die Daten. Dezimalkomma und -punkt werden beide erkannt,
-die Gerätemetadaten am Dateiende werden ignoriert.
+- **Cary-CSV/TXT-Exporte** (Agilent Cary 60 u. a.): erste Zeile = Probennamen, zweite Zeile =
+  `Wavelength (nm),Abs` je Probe, danach die Daten. Dezimalkomma und -punkt werden beide erkannt,
+  die Gerätemetadaten am Dateiende werden ignoriert. Einfache zweispaltige Dateien gehen auch; dann
+  dient der Dateiname als Probenname.
+- **Cary WinUV .DSW / .BSW** (Binärdateien der Gerätesoftware), gelesen mit dem Parser aus dem
+  Open-Source-Projekt [parseuv](https://pypi.org/project/parseuv/). Gerätebasislinien
+  („Baseline 100%T/0%T“) in Batch-Dateien werden übersprungen.
+- **Cary Eclipse** Fluoreszenzdaten: CSV-Export und .FBSW-Dateien. Die Anregungswellenlänge wird
+  aus den Metadaten der Datei übernommen.
+- **Mehrere Dateien** lassen sich zusammen öffnen und bilden einen Datensatz.
 
 ## Probleme
 
@@ -164,6 +211,8 @@ Es gibt keine Gewährleistung.
 Die App enthält folgende Bibliotheken unter ihren eigenen Lizenzen:
 PySide6/Qt (LGPL-3.0), PyMuPDF (AGPL-3.0), RDKit (BSD-3-Clause), matplotlib (Matplotlib License),
 NumPy (BSD-3-Clause), Pillow (MIT-CMU), pillow-heif (BSD-3-Clause, enthält libheif, LGPL-3.0),
-OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT).
+OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT), olefile (BSD-2-Clause).
+Der Leser für .DSW/.BSW-Dateien in `parseuv_lite/` stammt aus parseuv 1.0.4
+(© 2026 Ricardo J. Fernández-Terán, BSD-3-Clause, siehe `parseuv_lite/LICENSE`).
 Das ISNet-Modell für die Freistellung (Apache-2.0) wird beim ersten Gebrauch aus dem
 rembg-Projekt heruntergeladen und ist nicht Teil dieses Repositorys.

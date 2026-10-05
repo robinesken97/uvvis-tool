@@ -51,7 +51,7 @@ def load_cdxml(path) -> dict:
     try:
         if sanitized:
             mw = float(Descriptors.MolWt(mol))
-            formula = rdMolDescriptors.CalcMolFormula(mol)
+            formula = rdMolDescriptors.CalcMolFormula(mol, True, True)   # Isotope: D statt [2H]
         if dummies:
             mw = None        # Masse wäre zu klein -> lieber keine als eine falsche
     except Exception as e:  # pragma: no cover

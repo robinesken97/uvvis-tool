@@ -12,7 +12,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.1.0"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
 import uvvis_core as core  # noqa: E402
 import uvvis_images as IMG  # noqa: E402
 from uvvis_i18n import T, get_lang, set_lang  # noqa: E402
+import uvvis_tabs  # noqa: E402
 
 PREVIEW_DPI = 90
 FIGSIZE = (8.0, 6.0)
@@ -220,7 +221,7 @@ class MainWindow(QMainWindow):
         set_lang(self.settings.value("lang", "de"))
         self.csv_path = None
         self.groups, self.units = {}, {}
-        self.samples, self.conc = [], {}          # Rohproben und Konzentrations-Overrides
+        self.samples, self.conc, self.csv_paths = [], {}, []          # Rohproben und Konzentrations-Overrides
         self.series = {}               # je Serie: mw, structure, photo, bg, layout, assets
         self.current = None
         self.F = None
@@ -228,6 +229,10 @@ class MainWindow(QMainWindow):
         self._tasks = []
         self._loading = False
         self.glob = dict(DEFAULT_GLOB)
+        self.extra_cache = {}
+        self.ov_state = self._load_state("overlay_state")
+        self.fl_state = self._load_state("fluo_state")
+        self._tab_index = 0
 
         self.fig = MplFigure(figsize=FIGSIZE, dpi=PREVIEW_DPI)
         self.canvas = FigureCanvasQTAgg(self.fig)
@@ -258,7 +263,7 @@ class MainWindow(QMainWindow):
         m.addAction(a)
         m.addAction(QAction(T("act_conc"), self, triggered=self.edit_concentrations))
         m.addAction(QAction(T("act_restart"), self, triggered=self.restart_file))
-        m.addAction(QAction(T("act_export"), self, shortcut="Ctrl+E", triggered=self.export_dialog))
+        m.addAction(QAction(T("act_export"), self, shortcut="Ctrl+E", triggered=self.export_current))
         m.addSeparator()
         m.addAction(QAction(T("act_quit"), self, shortcut="Ctrl+Q", triggered=self.close))
         ml = mb.addMenu(T("menu_lang"))
@@ -282,7 +287,7 @@ class MainWindow(QMainWindow):
         self.btn_open = QPushButton(T("act_open"))
         self.btn_open.clicked.connect(self.choose_csv)
         row.addWidget(self.btn_open)
-        self.lbl_file = QLabel(Path(self.csv_path).name if self.csv_path else T("no_file"))
+        self.lbl_file = QLabel(self.files_label() if self.csv_path else T("no_file"))
         self.lbl_file.setWordWrap(True)
         row.addWidget(self.lbl_file, 1)
         f.addRow(row)
@@ -458,7 +463,15 @@ class MainWindow(QMainWindow):
         split.addWidget(lscroll)
         split.addWidget(right)
         split.setSizes([400, 920])
-        self.setCentralWidget(split)
+        self.main_tabs = QTabWidget()
+        self.main_tabs.addTab(split, T("tab_eps"))
+        self.ov_tab = uvvis_tabs.OverlayTab(self, self.ov_state)
+        self.fl_tab = uvvis_tabs.FluoTab(self, self.fl_state)
+        self.main_tabs.addTab(self.ov_tab, T("tab_overlay"))
+        self.main_tabs.addTab(self.fl_tab, T("tab_fluo"))
+        self.main_tabs.setCurrentIndex(self._tab_index)
+        self.main_tabs.currentChanged.connect(lambda i: setattr(self, "_tab_index", i))
+        self.setCentralWidget(self.main_tabs)
 
         self.apply_globals()
         self.apply_series_widgets()
@@ -593,20 +606,36 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------ Daten
     def choose_csv(self):
         start = self.settings.value("last_dir", str(Path.home()))
-        p, _ = QFileDialog.getOpenFileName(self, T("dlg_open_csv"), start,
-                                           f"{T('flt_csv')};;{T('flt_all')}")
-        if p:
-            self.open_csv(p)
+        ps, _ = QFileDialog.getOpenFileNames(self, T("dlg_open_csv"), start,
+                                             f"{T('flt_csv')};;{T('flt_all')}")
+        if ps:
+            self.open_files(ps)
 
     def open_csv(self, path, ask=True):
-        path = str(Path(path).resolve())
+        return self.open_files([path], ask)
+
+    def files_label(self):
+        names = [Path(p).name for p in self.csv_paths]
+        if len(names) == 1:
+            return names[0]
+        short = ", ".join(names[:3]) + (", …" if len(names) > 3 else "")
+        return T("files_loaded", n=len(names), names=short)
+
+    def open_files(self, paths, ask=True):
+        """Eine oder mehrere Messdateien (CSV/TXT/DSW/BSW) gemeinsam öffnen,
+        z. B. wenn jede Konzentration einzeln gemessen wurde."""
+        paths = sorted(str(Path(p).resolve()) for p in paths)
+        path = paths[0]
         try:
-            samples = core.read_cary_samples(path)
+            samples = core.read_samples(paths)
         except Exception as e:
-            self.error(str(e))
+            self.error(f"{type(e).__name__}: {e}")
+            return False
+        if not samples:
+            self.error(T("conc_none"))
             return False
         self.save_project()
-        self.csv_path, self.samples = path, samples
+        self.csv_path, self.csv_paths, self.samples = path, paths, samples
         self.settings.setValue("last_dir", str(Path(path).parent))
         self.groups, self.units, self.series, self.conc = {}, {}, {}, {}
         data = self.read_project()
@@ -615,11 +644,11 @@ class MainWindow(QMainWindow):
         if missing and ask and not self.edit_concentrations(rebuild=False):
             pass
         if not self.rebuild_groups():
-            self.lbl_file.setText(Path(path).name)
+            self.lbl_file.setText(self.files_label())
             self.error(T("conc_none"))
             return False
         self.load_project(data)
-        self.lbl_file.setText(Path(path).name)
+        self.lbl_file.setText(self.files_label())
         self.apply_globals()
         self.apply_series_widgets()
         self.render()
@@ -677,7 +706,7 @@ class MainWindow(QMainWindow):
             if ans != QMessageBox.Yes:
                 return False
         pf = self.project_file()
-        path = self.csv_path
+        paths = list(self.csv_paths)
         self.csv_path = None                      # verhindert, dass open_csv vorher noch speichert
         try:
             if pf and pf.exists():
@@ -686,10 +715,14 @@ class MainWindow(QMainWindow):
             self.error(str(e))
         self.glob = dict(DEFAULT_GLOB)
         self.series, self.conc, self.current = {}, {}, None
-        return self.open_csv(path)
+        return self.open_files(paths)
 
     def project_file(self):
-        return Path(self.csv_path).with_suffix(".uvvis.yaml") if self.csv_path else None
+        if not self.csv_path:
+            return None
+        n = len(getattr(self, "csv_paths", [])) or 1
+        p = Path(self.csv_path)
+        return p.with_name(f"{p.stem}+{n - 1}.uvvis.yaml") if n > 1 else p.with_suffix(".uvvis.yaml")
 
     def save_project(self):
         pf = self.project_file()
@@ -794,6 +827,8 @@ class MainWindow(QMainWindow):
                 info.append(T("mw_formula", f=asset["formula"], mw=asset["mw"]))
                 if autofill_mw:
                     st["mw"] = round(asset["mw"], 2)
+            if asset.get("drawing_from"):
+                info.append(T("drawing_from", name=asset["drawing_from"]))
             info += asset.get("warnings") or []
             st["chem_info"] = "\n".join(info)
             st["chem_warn"] = bool(asset.get("warnings"))
@@ -1030,7 +1065,7 @@ class MainWindow(QMainWindow):
         for i, r in enumerate(results):
             ft = r["fit"]
             if ft:
-                v, e = core.fmt_ve(r["eps"], r["eps_err"])
+                v, e = core.fmt_ve(r["eps"], r["eps_err"], max_decimals=core.eps_max_decimals(cfg))
                 b, be = core.fmt_ve(ft["intercept"], ft["se_intercept"])
                 cells = [f"{r['lam']:g}", str(ft["n"]), f"{v} ± {e}" if e else v,
                          f"{b} ± {be}" if be else b, f"{ft['r2']:.5f}", "; ".join(r["warnings"])]
@@ -1082,12 +1117,15 @@ class MainWindow(QMainWindow):
             ev.acceptProposedAction()
 
     def dropEvent(self, ev):
-        for url in ev.mimeData().urls():
-            p = url.toLocalFile()
+        files = [u.toLocalFile() for u in ev.mimeData().urls()]
+        data = [p for p in files if Path(p).suffix.lower() in {".csv", ".txt"} | core.BINARY_EXT]
+        if data:
+            self.open_files(data)                     # mehrere Messdateien = ein Datensatz
+        for p in files:
             ext = Path(p).suffix.lower()
-            if ext in (".csv", ".txt"):
-                self.open_csv(p)
-            elif not self.current:
+            if p in data:
+                continue
+            if not self.current:
                 self.error(T("load_first"))
             elif ext in IMG.CHEM_EXT | IMG.VECTOR_EXT:
                 self.set_structure(p)
@@ -1100,7 +1138,32 @@ class MainWindow(QMainWindow):
         if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
             QMessageBox.critical(self, T("err_title"), str(msg))
 
+    def _load_state(self, key):
+        try:
+            return yaml.safe_load(self.settings.value(key, "") or "") or {}
+        except Exception:
+            return {}
+
+    def rebuild_tabs(self):
+        self.build_ui()
+        self.render()
+
+    def export_current(self):
+        i = self.main_tabs.currentIndex()
+        if i == 1:
+            return self.ov_tab.export_dialog()
+        if i == 2:
+            return self.fl_tab.export_dialog()
+        return self.export_dialog()
+
+    def info(self, msg):
+        self.log_signal.emit(msg)
+        if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+            QMessageBox.information(self, T("app_title"), msg)
+
     def closeEvent(self, ev):
+        for key, st in (("overlay_state", self.ov_state), ("fluo_state", self.fl_state)):
+            self.settings.setValue(key, yaml.safe_dump(st, allow_unicode=True))
         self.save_project()
         self.settings.setValue("geometry", self.saveGeometry())
         super().closeEvent(ev)
@@ -1204,6 +1267,71 @@ def selftest(outdir, with_isnet=False):
         w.save_project()
         assert w.open_csv(plain, ask=False) and "unbenannt" in w.groups   # aus Projekt geladen
         report.append("unnamed samples: OK")
+        # Einzelmessungen in getrennten Dateien + Cary-Binärdatei (.DSW)
+        import struct
+        singles = []
+        for i, s_ in enumerate(core.read_samples([csv])[:5]):
+            f = out / "input" / f"single_{i}.csv"
+            f.write_text("\r\n".join([f"{s_['name']},,", "Wavelength (nm),Abs,"] +
+                                      [f"{a:.4f},{b:.6f}," for a, b in zip(s_["x"], s_["y"])]),
+                         encoding="utf-8")
+            singles.append(f)
+        assert w.open_files(singles, ask=False) and len(w.groups["TEST-A"]) == 5, w.groups
+        magic = b"Varian UV-VIS Spectrophotometer"
+        blob = bytearray([len(magic)]) + magic
+        blob += bytes(0x400 - len(blob))
+        for k in range(3):
+            blk = bytearray(256)
+            t = f"DSW-T-{0.5 / 2 ** k:g}".replace(".", "p").encode() + b"mgml"
+            blk[:len(t)] = t
+            blob += blk
+            for x in np.arange(800.0, 249.0, -1.0):
+                blob += struct.pack("<ff", x, 0.4 / 2 ** k * np.exp(-((x - 450) / 40) ** 2))
+            blob += bytes(64)
+        dsw = out / "input" / "test.DSW"
+        dsw.write_bytes(bytes(blob))
+        assert w.open_files([dsw], ask=False) and len(w.groups.get("DSW-T", [])) == 3, w.groups
+        report.append("multiple files + DSW: OK")
+        # Overlay (Messung + TD-DFT) und Fluoreszenz
+        orca = out / "input" / "orca.out"
+        orca.write_text("\n".join([
+            "-" * 77, "         ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE MOMENTS", "-" * 77,
+            "State   Energy    Wavelength  fosc         T2        TX        TY        TZ",
+            "        (cm-1)      (nm)                 (au**2)    (au)      (au)      (au)", "-" * 77,
+            "   1   20660.0    484.0   0.150000000   1.00000   1.00000   0.00000   0.00000",
+            "   2   38168.0    262.0   0.600000000   3.00000   1.70000   0.00000   0.00000", ""]),
+            encoding="utf-8")
+        assert len(__import__("uvvis_extra").parse_tddft(orca)["E"]) == 2
+        w.ov_state["entries"] = [
+            {"kind": "exp", "file": str(csv), "sample": "TEST-A-0p25mgml_THF", "label": "exp", "color": "#000000",
+             "visible": True, "own_norm": False, "nlo": 450, "nhi": 520, "conc": 0.25, "unit": "mg/mL",
+             "mw": 95.1, "d": 1.0},
+            {"kind": "calc", "file": str(orca), "label": "calc", "color": "#1764e8", "visible": True,
+             "own_norm": False, "nlo": 450, "nhi": 520, "fwhm": 0.3, "shift": 0.0}]
+        w.ov_state.update(nlo=450, nhi=520)
+        for mode in ("norm", "eps"):
+            w.ov_state["mode"] = mode
+            files = w.ov_tab.export_to(out / f"overlay_{mode}")
+            assert all(f.exists() for f in files), files
+        em = out / "input" / "emission.csv"
+        xs = np.arange(400.0, 701.0, 1.0)
+        em.write_text("\r\n".join(["EM ex352,,", "Wavelength (nm),Intensity (a.u.),"] +
+                                    [f"{x:.1f},{500 * np.exp(-((x - 520) / 30) ** 2):.3f}," for x in xs]),
+                      encoding="utf-8")
+        w.fl_state.update(abs_file=str(csv), abs_sample="TEST-A-0p25mgml_THF", em_file=str(em),
+                          em_sample="EM ex352", ex=352.0, alo=450, ahi=520, eps="1234",
+                          photo_day=str(photo), bg_day="grabcut", photo_uv=str(photo), bg_uv="none")
+        files = w.fl_tab.export_to(out / "fluorescence")
+        assert all(f.exists() for f in files), files
+        # Cary-Eclipse-CSV (Name in Zeile 2, λex aus den Metadaten)
+        ecl = out / "input" / "eclipse.csv"
+        ecl.write_text("\r\n".join(["Wavelength (nm),Intensity (a.u.),Z Axis,", ",PROBE-1-45p3µM", ",1"] +
+                                     [f"{x:g},{300 * np.exp(-((x - 480) / 25) ** 2):.4f}" for x in xs] +
+                                     ["", "PROBE-1-45p3µM", "Ex. Wavelength (nm)               387.00"]),
+                       encoding="utf-8")
+        es = core.read_samples([ecl])
+        assert len(es) == 1 and es[0]["name"] == "PROBE-1-45p3µM" and es[0]["ex"] == 387.0, es[0]["name"]
+        report.append("overlay + fluorescence + Eclipse CSV: OK")
         for lang in ("en", "de"):
             w.switch_lang(lang)
         report.append("OK")

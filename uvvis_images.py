@@ -331,13 +331,32 @@ def load_structure(path, target_px=2400):
     path = Path(path)
     ext = path.suffix.lower()
     info = {"mw": None, "formula": None, "warnings": []}
-    if ext in CHEM_EXT or ext in VECTOR_EXT:
+    if ext in CHEM_EXT:
+        import uvvis_chem
+        chem = uvvis_chem.load_cdxml(path)
+        svg = chem.pop("svg")
+        info.update(chem)
+        original = find_sibling_drawing(path)
+        if original is not None:
+            # Grafik unverändert aus der ChemDraw-Exportdatei, Molmasse aus der CDXML
+            res = load_structure(original, target_px)
+            res.update({k: info[k] for k in ("mw", "formula", "warnings")})
+            res["n_fragments"] = info.get("n_fragments")
+            res["drawing_from"] = original.name
+            return res
+        info["warnings"] = info["warnings"] + [T("cdxml_redrawn", name=path.stem)]
+        doc = _vector_doc(path, svg)
+        page = doc[0]
+        clip = _content_rect(page)
+        dpi = max(150, min(2400, int(target_px / max(clip.width, 1) * 72)))
+        pix = page.get_pixmap(clip=clip, dpi=dpi, alpha=True)
+        rgba = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n).copy()
+        if pix.n == 3:
+            rgba = np.dstack([rgba, np.full(rgba.shape[:2], 255, np.uint8)])
+        rgba = white_to_alpha(rgba, 250) if rgba[..., 3].min() == 255 else rgba
+        return {"rgba": rgba, "pdf": doc.tobytes(), "clip": tuple(clip), **info}
+    if ext in VECTOR_EXT:
         svg = None
-        if ext in CHEM_EXT:
-            import uvvis_chem
-            chem = uvvis_chem.load_cdxml(path)
-            svg = chem.pop("svg")
-            info.update(chem)
         doc = _vector_doc(path, svg)
         page = doc[0]
         clip = _content_rect(page)
@@ -352,6 +371,19 @@ def load_structure(path, target_px=2400):
         raise RuntimeError(T("cdx_binary"))
     arr = open_any_image(path)
     return {"rgba": trim_alpha(white_to_alpha(trim_uniform(arr))), "pdf": None, "clip": None, **info}
+
+
+SIBLING_DRAWING_EXT = (".svg", ".pdf", ".png", ".tif", ".tiff")
+
+
+def find_sibling_drawing(cdxml_path):
+    """Gleichnamige ChemDraw-Exportdatei neben der CDXML (SVG/PDF bevorzugt, sonst PNG/TIFF)."""
+    p = Path(cdxml_path)
+    candidates = {c.suffix.lower(): c for c in p.parent.glob(p.stem + ".*") if c.stem == p.stem}
+    for ext in SIBLING_DRAWING_EXT:
+        if ext in candidates:
+            return candidates[ext]
+    return None
 
 
 def load_photo(path, remove_bg="auto", cache_dir=None):

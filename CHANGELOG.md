@@ -2,30 +2,42 @@
 
 # Changelog
 
-## 1.0.1 – 2026-10-05
+## 1.1.0 – 2026-10-05
 
 **Please check:** concentrations entered with 1.0.0 via the concentration dialog may have been
-saved in mM without anyone choosing that unit (see first fix). Open the file and check
-**Concentrations…**.
-
-### Fixed
-- Concentration dialog: the unit (previously mM) and the start value of the dilution series
-  (previously 1.0) are no longer pre-filled. The dialog cannot be confirmed with concentrations
-  but without a unit.
+saved in mM without anyone choosing that unit. Open the file and check **Concentrations…**.
 
 ### Added
-- **File → Start over:** discards all saved inputs for the current CSV (concentrations, molar
-  masses, structures, photos, settings, layout) and starts from scratch.
-- Missing molar mass for concentrations in mg/mL is now highlighted in red, with a note that
-  *a* [L g⁻¹ cm⁻¹] is reported instead of ε.
-- Note below the molar mass field when concentrations are given in mM/µM and the molar mass
-  is therefore not used.
+- **Overlay tab:** several measured spectra and TD-DFT spectra (ORCA 4–6, Gaussian) in one figure,
+  in individual colours; normalised to a band of interest (globally or per spectrum) or as
+  ε [10³ M⁻¹ cm⁻¹]. TD-DFT: Gaussian broadening (FWHM, energy shift), optional sticks.
+- **Fluorescence tab:** absorption and emission normalised in one figure, with λ/ε and λem labels,
+  optional masking of scattered light, and a daylight/UV photo pair with arrow and excitation
+  wavelength. Set-ups of both new tabs are kept between sessions and can be saved/loaded.
+- Reading of Cary WinUV **.DSW/.BSW** files and Cary Eclipse **.FBSW** files (parser from parseuv,
+  BSD-3-Clause) and of Cary Eclipse CSV exports; λex is taken from the metadata.
+- **Several data files at once** (e.g. each concentration measured separately) form one data set,
+  also via drag & drop.
+- Structure drawing **unchanged from ChemDraw**: an SVG/PDF/PNG export with the same name next to
+  the CDXML is used for the drawing, the CDXML for the molar mass.
+- **File → Start over** discards all saved inputs for the current file.
+- Missing molar mass for concentrations in mg/mL is highlighted in red; a note explains when the
+  molar mass is not used (mM/µM).
+
+### Changed
+- ε (M⁻¹ cm⁻¹) is never displayed with decimals.
+- The molecular formula shows isotopes (e.g. D for deuterium); the molar mass already included them.
+
+### Fixed
+- Concentration dialog: unit and start value are no longer pre-filled (previously mM and 1.0).
+- Spectra without signal in the normalisation range are skipped with a note instead of being
+  scaled up from noise.
 
 ## 1.0.0 – 2026-10-04
 
 First release.
 
-- Import of Cary multi-sample exports. Concentrations from sample names or entered in a table
+- Import of Cary multi-sample CSV exports. Concentrations from sample names or entered in a table
   (with dilution-series helper).
 - Automatic baseline correction, band search, Beer–Lambert fits with ε ± standard error, R²
   and warnings.

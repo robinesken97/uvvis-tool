@@ -8,3 +8,4 @@ rdkit
 pillow-heif
 onnxruntime
 opencv-python-headless
+olefile
