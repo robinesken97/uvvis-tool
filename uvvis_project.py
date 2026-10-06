@@ -42,6 +42,7 @@ def _path_slots(state):
     ov = state.get("overlay") or {}
     for e in ov.get("entries") or []:
         slots.append((e, "file", "data"))
+        slots.append((e, "structure", "images"))
     slots.append((ov, "structure", "images"))
     fl = state.get("fluo") or {}
     slots += [(fl, "abs_file", "data"), (fl, "em_file", "data"), (fl, "structure", "images"),

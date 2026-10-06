@@ -12,6 +12,7 @@ Pakete: pillow-heif (HEIC), onnxruntime (KI-Freistellung, ISNet-Modell wird beim
 from __future__ import annotations
 
 import hashlib
+import re
 import os
 import sys
 import urllib.request
@@ -315,7 +316,7 @@ def _content_rect(page):
         add(pymupdf.Rect(img["bbox"]))
     if not xs:
         return page.rect
-    pad = 3
+    pad = 1.5
     r = pymupdf.Rect(min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
     return r & page.rect
 
@@ -334,8 +335,43 @@ def _vector_doc(path, svg_text=None):
     return pymupdf.open("pdf", src.convert_to_pdf())
 
 
-def load_structure(path, target_px=2400):
-    """-> dict(rgba=Vorschau, pdf=bytes|None, clip, mw, formula, warnings)."""
+_BLACK = re.compile(r"(#000000|#000(?![0-9a-fA-F])|\bblack\b|rgb\(\s*0\s*,\s*0\s*,\s*0\s*\)|"
+                    r"rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\))", re.I)
+
+
+def recolor_svg(svg_text, color):
+    """Schwarze Striche/Flächen/Schrift einer SVG in die gewünschte Farbe umfärben."""
+    return _BLACK.sub(color, svg_text)
+
+
+def tint_rgba(arr, color):
+    """Rastergrafik einfärben: Form (Alpha) bleibt, Farbe wird ersetzt (für schwarze Strukturen)."""
+    c = color.lstrip("#")
+    rgb = np.array([int(c[i:i + 2], 16) for i in (0, 2, 4)], np.uint8)
+    out = arr.copy()
+    out[..., :3] = rgb
+    return out
+
+
+def _render_doc(doc, target_px, info):
+    page = doc[0]
+    clip = _content_rect(page)
+    dpi = max(150, min(2400, int(target_px / max(clip.width, 1) * 72)))  # feste Pixelbreite
+    pix = page.get_pixmap(clip=clip, dpi=dpi, alpha=True)
+    rgba = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n).copy()
+    if pix.n == 3:
+        rgba = np.dstack([rgba, np.full(rgba.shape[:2], 255, np.uint8)])
+    else:                                              # MuPDF liefert vormultipliertes Alpha
+        a = rgba[..., 3:4].astype(np.float32)
+        rgb = rgba[..., :3].astype(np.float32)
+        rgba[..., :3] = np.where(a > 0, np.clip(rgb * 255.0 / np.maximum(a, 1), 0, 255), 0).astype(np.uint8)
+    rgba = white_to_alpha(rgba, 250) if rgba[..., 3].min() == 255 else rgba
+    return {"rgba": rgba, "pdf": doc.tobytes(), "clip": tuple(clip), **info}
+
+
+def load_structure(path, target_px=2400, color=None):
+    """-> dict(rgba=Vorschau, pdf=bytes|None, clip, mw, formula, warnings).
+    color (z. B. '#e8231b'): Struktur einfärben – SVG/CDXML als Vektor, PDF/Raster als Bild."""
     path = Path(path)
     ext = path.suffix.lower()
     info = {"mw": None, "formula": None, "warnings": []}
@@ -347,38 +383,32 @@ def load_structure(path, target_px=2400):
         original = find_sibling_drawing(path)
         if original is not None:
             # Grafik unverändert aus der ChemDraw-Exportdatei, Molmasse aus der CDXML
-            res = load_structure(original, target_px)
+            res = load_structure(original, target_px, color)
             res.update({k: info[k] for k in ("mw", "formula", "warnings")})
             res["n_fragments"] = info.get("n_fragments")
             res["drawing_from"] = original.name
             return res
         info["warnings"] = info["warnings"] + [T("cdxml_redrawn", name=path.stem)]
-        doc = _vector_doc(path, svg)
-        page = doc[0]
-        clip = _content_rect(page)
-        dpi = max(150, min(2400, int(target_px / max(clip.width, 1) * 72)))
-        pix = page.get_pixmap(clip=clip, dpi=dpi, alpha=True)
-        rgba = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n).copy()
-        if pix.n == 3:
-            rgba = np.dstack([rgba, np.full(rgba.shape[:2], 255, np.uint8)])
-        rgba = white_to_alpha(rgba, 250) if rgba[..., 3].min() == 255 else rgba
-        return {"rgba": rgba, "pdf": doc.tobytes(), "clip": tuple(clip), **info}
-    if ext in VECTOR_EXT:
-        svg = None
-        doc = _vector_doc(path, svg)
-        page = doc[0]
-        clip = _content_rect(page)
-        dpi = max(150, min(2400, int(target_px / max(clip.width, 1) * 72)))  # feste Pixelbreite
-        pix = page.get_pixmap(clip=clip, dpi=dpi, alpha=True)
-        rgba = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, pix.n).copy()
-        if pix.n == 3:
-            rgba = np.dstack([rgba, np.full(rgba.shape[:2], 255, np.uint8)])
-        rgba = white_to_alpha(rgba, 250) if rgba[..., 3].min() == 255 else rgba
-        return {"rgba": rgba, "pdf": doc.tobytes(), "clip": tuple(clip), **info}
+        if color:
+            svg = recolor_svg(svg, color)
+        return _render_doc(_vector_doc(path, svg), target_px, info)
+    if ext == ".svg":
+        svg = Path(path).read_text(encoding="utf-8", errors="replace")
+        if color:
+            svg = recolor_svg(svg, color)
+        return _render_doc(_vector_doc(path, svg), target_px, info)
+    if ext in VECTOR_EXT:                              # PDF: Vektor nur ungefärbt
+        res = _render_doc(_vector_doc(path, None), target_px, info)
+        if color:
+            res.update(rgba=tint_rgba(res["rgba"], color), pdf=None, clip=None)
+        return res
     if ext == ".cdx":
         raise RuntimeError(T("cdx_binary"))
     arr = open_any_image(path)
-    return {"rgba": trim_alpha(white_to_alpha(trim_uniform(arr))), "pdf": None, "clip": None, **info}
+    arr = trim_alpha(white_to_alpha(trim_uniform(arr)))
+    if color:
+        arr = tint_rgba(arr, color)
+    return {"rgba": arr, "pdf": None, "clip": None, **info}
 
 
 SIBLING_DRAWING_EXT = (".svg", ".pdf", ".png", ".tif", ".tiff")

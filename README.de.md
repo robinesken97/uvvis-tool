@@ -125,8 +125,10 @@ Mehrere Spektren in einer Abbildung vergleichen, gemessen und berechnet:
 - Pro Spektrum: Farbe, Name, **Linienart und -stärke**, **Skalierungsfaktor und vertikaler Versatz**
   (z. B. für gestapelte Spektren); **Reihenfolge** mit ↑/↓ (auch die der Legende).
 - ORCA-Rechnungen mit **Spin-Bahn-Kopplung**: pro Rechnung „mit SOC“ oder „ohne SOC“ wählbar.
-- **Strichhöhe:** „stärkster Strich = Bandenmaximum“, „Höhe der Einzelbande“ oder
-  „Oszillatorstärke f“ auf eigener rechter Achse.
+- **TD-DFT-Normierung:** Kurve und Striche haben immer denselben Skalierungsfaktor (jeder Strich ist
+  die Höhe seiner eigenen Gaußbande, die Kurve ist deren Summe). Bezug: „Kurvenmaximum = 1“ oder
+  „stärkster Übergang = 1“; alternativ zeigen die Striche die Oszillatorstärke f auf einer rechten Achse.
+- Eine **Struktur pro Spektrum**, optional in der Kurvenfarbe.
 - Struktur mit einstellbarer Größe; die Legende wird in freie Fläche gesetzt und lässt sich verschieben.
 
 ## Fluoreszenz-Tab

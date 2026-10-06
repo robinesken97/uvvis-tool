@@ -2,6 +2,27 @@
 
 # Changelog
 
+## 1.2.1 – 2026-10-06
+
+### Added
+- **Overlay:** a structure per spectrum, optionally drawn in the curve colour (SVG/CDXML as vector
+  graphics, PNG/PDF as image).
+
+### Changed
+- **TD-DFT normalisation:** curve and sticks now always share one scale factor (each stick = height of
+  its own Gaussian, the curve is their sum). Reference "curve maximum = 1" (new default) or "strongest
+  transition = 1"; alternatively sticks as oscillator strength f on a right axis. In 1.2.0, the
+  sticks were scaled independently of the curve in "strongest stick = band maximum" mode.
+
+### Fixed
+- Structures (CDXML, SVG, PDF) were cropped too tightly: bonds running exactly vertically or
+  horizontally at the edge (e.g. =CH₂, CH₃) were cut off in figures and exports.
+- Structures were distorted when their aspect ratio or the axes size changed (e.g. f axis switched on);
+  only the width is stored now, the height always follows the image. Existing projects are corrected
+  automatically.
+- Structures drawn from CDXML without an export had too thin lines and too small labels.
+- Coloured structures had dark edges.
+
 ## 1.2.0 – 2026-10-06
 
 ### Added
@@ -15,8 +36,8 @@
 - **Undo / Redo** (⌘Z / ⌘⇧Z, Ctrl+Z / Ctrl+Y) across all tabs.
 - **Overlay:** line style and width, scale factor and vertical offset per spectrum, order (↑/↓),
   structure size in %, legend placed in free space.
-- **TD-DFT sticks:** "strongest stick = band maximum" (new default), "height of individual band",
-  or oscillator strength f on a separate right axis.
+- **TD-DFT sticks:** "strongest stick = band maximum" (default), "height of individual band", or
+  oscillator strength f on a separate right axis.
 - ORCA **spin–orbit coupling** spectra; "with SOC" / "without SOC" selectable per calculation.
 - ε tab: regression inset can be switched off (in addition to its table).
 - Fluorescence tab: size fields for structure and photos.
@@ -28,7 +49,6 @@
   fluorescence tabs are no longer restored automatically at start – use project folders instead.
 
 ### Fixed
-- Structures (CDXML, SVG, PDF) were cropped too tightly: bonds running exactly vertically or horizontally at the edge (e.g. =CH₂, CH₃) were cut off in figures and exports.
 - ORCA output with spin–orbit coupling was read incorrectly (state labels such as "0-1.0A" were taken
   as numbers, giving wrong energies and oscillator strengths). Please reload such calculations.
 

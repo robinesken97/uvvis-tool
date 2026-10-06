@@ -122,8 +122,10 @@ Compare several spectra in one figure, measured and calculated:
 - Per spectrum: colour, name, **line style and width**, **scale factor and vertical offset**
   (e.g. for stacked spectra); **order** with ↑/↓ (also the legend order).
 - ORCA calculations with **spin–orbit coupling**: choose "with SOC" or "without SOC" per calculation.
-- **Stick height:** "strongest stick = band maximum", "height of individual band" or
-  "oscillator strength f" on a separate right axis.
+- **TD-DFT normalisation:** curve and sticks always share one scale factor (each stick is the height
+  of its own Gaussian, the curve is their sum). Reference: "curve maximum = 1" or "strongest
+  transition = 1"; alternatively the sticks show the oscillator strength f on a right axis.
+- A **structure per spectrum**, optionally drawn in the curve colour.
 - Structure with adjustable size; the legend is placed in free space and can be dragged.
 
 ## Fluorescence tab

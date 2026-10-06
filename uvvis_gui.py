@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -1734,6 +1734,12 @@ def selftest(outdir, with_isnet=False):
         cr = IMG._content_rect(pg)
         assert cr.y1 >= 160 and cr.x0 <= 50 and cr.x1 >= 150, cr
         report.append("structure trimming: OK")
+
+        # Einfärben von Strukturen (Overlay: Struktur pro Spektrum in Kurvenfarbe)
+        ca = IMG.load_structure(cdxml, color="#e8231b")
+        opaque = ca["rgba"][..., 3] > 200
+        assert ca["pdf"] and abs(int(np.median(ca["rgba"][opaque][:, 0])) - 232) < 3, "Einfärben"
+        report.append("structure colour: OK")
 
         # Overlay-Optionen: Skalierung, Versatz, Linienart, Strich-Modi
         w.ov_state["entries"][1].update(scale=0.8, offset=0.2, ls="dotted", lw=2.0)

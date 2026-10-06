@@ -2,6 +2,27 @@
 
 # Änderungen
 
+## 1.2.1 – 06.10.2026
+
+### Neu
+- **Overlay:** Struktur pro Spektrum, optional in der Kurvenfarbe (SVG/CDXML als Vektorgrafik,
+  PNG/PDF als Bild).
+
+### Geändert
+- **TD-DFT-Normierung:** Kurve und Striche haben jetzt immer denselben Skalierungsfaktor (jeder Strich =
+  Höhe seiner eigenen Gaußbande, die Kurve ist deren Summe). Bezug „Kurvenmaximum = 1“ (neuer Standard)
+  oder „stärkster Übergang = 1“; alternativ Striche als Oszillatorstärke f auf rechter Achse. In 1.2.0
+  wurden die Striche im Modus „stärkster Strich = Bandenmaximum“ unabhängig von der Kurve skaliert.
+
+### Korrigiert
+- Strukturen (CDXML, SVG, PDF) wurden zu knapp zugeschnitten: exakt senkrechte oder waagerechte
+  Bindungen am Rand (z. B. =CH₂, CH₃) fehlten in Abbildungen und Exporten.
+- Strukturen wurden verzerrt, wenn sich ihr Seitenverhältnis oder die Achsengröße änderte (z. B. f-Achse
+  zugeschaltet); gespeichert wird jetzt nur die Breite, die Höhe folgt immer aus dem Bild. Bestehende
+  Projekte werden automatisch korrigiert.
+- Aus CDXML ohne Export gezeichnete Strukturen hatten zu dünne Linien und zu kleine Beschriftungen.
+- Eingefärbte Strukturen hatten dunkle Kanten.
+
 ## 1.2.0 – 06.10.2026
 
 ### Neu
@@ -16,8 +37,8 @@
 - **Rückgängig / Wiederholen** (⌘Z / ⌘⇧Z, Strg+Z / Strg+Y) über alle Tabs.
 - **Overlay:** Linienart und -stärke, Skalierungsfaktor und vertikaler Versatz pro Spektrum,
   Reihenfolge (↑/↓), Strukturgröße in %, Legende in freier Fläche.
-- **TD-DFT-Striche:** „stärkster Strich = Bandenmaximum“ (neuer Standard), „Höhe der Einzelbande“
-  oder Oszillatorstärke f auf eigener rechter Achse.
+- **TD-DFT-Striche:** „stärkster Strich = Bandenmaximum“ (Standard), „Höhe der Einzelbande“ oder
+  Oszillatorstärke f auf eigener rechter Achse.
 - ORCA-Spektren mit **Spin-Bahn-Kopplung**; „mit SOC“ / „ohne SOC“ pro Rechnung wählbar.
 - ε-Tab: Regressions-Inset abschaltbar (zusätzlich zu seiner Tabelle).
 - Fluoreszenz-Tab: Größenfelder für Struktur und Fotos.
@@ -29,7 +50,6 @@
   Fluoreszenz-Tab werden beim Start nicht mehr automatisch wiederhergestellt – dafür gibt es Projektordner.
 
 ### Korrigiert
-- Strukturen (CDXML, SVG, PDF) wurden zu knapp zugeschnitten: exakt senkrechte oder waagerechte Bindungen am Rand (z. B. =CH₂, CH₃) fehlten in Abbildungen und Exporten.
 - ORCA-Ausgaben mit Spin-Bahn-Kopplung wurden falsch gelesen (Zustandsnamen wie „0-1.0A“ wurden als
   Zahlen interpretiert, mit falschen Energien und Oszillatorstärken). Solche Rechnungen bitte neu laden.
 

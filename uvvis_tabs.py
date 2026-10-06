@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import traceback
+import uuid
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -263,8 +264,8 @@ class FigureTab(QWidget):
                 return s_
         return None
 
-    def structure_asset(self, path):
-        return self.cache(("struct", path), lambda: IMG.load_structure(path))
+    def structure_asset(self, path, color=None):
+        return self.cache(("struct", path, color), lambda: IMG.load_structure(path, color=color))
 
     def photo_asset(self, path, method):
         if method in ("auto", "isnet") and not self.main.ensure_model():
@@ -385,7 +386,7 @@ COMMON_DEFAULTS = {"x_auto": True, "x_min": 200.0, "x_max": 800.0, "size": "half
 class OverlayTab(FigureTab):
     STATE_KEY = "overlay"
     DEFAULT_STATE = dict(COMMON_DEFAULTS, entries=[], mode="norm", nlo=300.0, nhi=500.0, ymax=0.0,
-                         baseline=True, sticks=True, stick_mode="max", structure=None, struct_w=20.0)
+                         baseline=True, sticks=True, stick_mode="band", structure=None, struct_w=20.0)
 
     def build_controls(self):
         st = self.st
@@ -463,6 +464,18 @@ class OverlayTab(FigureTab):
         row.addWidget(self.cmb_ls, 1)
         row.addWidget(self.sp_lw)
         f.addRow(T("ov_line"), row)
+        row = QHBoxLayout()
+        self.lbl_estruct = QLabel("–")
+        b1, b2 = QPushButton(T("choose")), QPushButton(T("remove"))
+        b1.clicked.connect(self.choose_entry_structure)
+        b2.clicked.connect(lambda: self.set_entry_structure(None))
+        row.addWidget(self.lbl_estruct, 1)
+        row.addWidget(b1)
+        row.addWidget(b2)
+        f.addRow(T("structure"), row)
+        self.cb_ecolor = QCheckBox(T("ov_struct_color"))
+        self.cb_ecolor.toggled.connect(self.detail_changed)
+        f.addRow(self.cb_ecolor)
         for w in (self.sp_elo, self.sp_ehi, self.sp_d, self.sp_fwhm, self.sp_shift, self.sp_scale,
                   self.sp_offset, self.sp_lw):
             w.valueChanged.connect(self.detail_changed)
@@ -494,9 +507,9 @@ class OverlayTab(FigureTab):
         f.addRow(self.cb_base)
         f.addRow(self.cb_sticks)
         self.cmb_stick = QComboBox()
-        for key in ("max", "band", "faxis"):
+        for key in ("band", "max", "faxis"):
             self.cmb_stick.addItem(T("stick_" + key), key)
-        self.cmb_stick.setCurrentIndex(max(0, self.cmb_stick.findData(st.get("stick_mode", "max"))))
+        self.cmb_stick.setCurrentIndex(max(0, self.cmb_stick.findData(st.get("stick_mode", "band"))))
         f.addRow(T("stick_mode"), self.cmb_stick)
         self.cmb_stick.currentIndexChanged.connect(self.changed)
         row = QHBoxLayout()
@@ -582,6 +595,8 @@ class OverlayTab(FigureTab):
             self.timer.start()
 
     def fill_table(self):
+        for e in self.st["entries"]:
+            e.setdefault("uid", uuid.uuid4().hex[:8])     # stabiler Schlüssel fürs Layout (Reihenfolge änderbar)
         self._loading = True
         self.table.setRowCount(len(self.st["entries"]))
         for i, e in enumerate(self.st["entries"]):
@@ -625,6 +640,8 @@ class OverlayTab(FigureTab):
         for w in (self.lbl_fwhm, self.sp_fwhm, self.lbl_shift, self.sp_shift, self.lbl_soc, self.cmb_soc):
             w.setVisible(e is not None and not exp)
         if e:
+            self.lbl_estruct.setText(Path(e["structure"]).name if e.get("structure") else "–")
+            self.cb_ecolor.setChecked(e.get("struct_color", True))
             self.sp_scale.setValue(e.get("scale", 1.0))
             self.sp_offset.setValue(e.get("offset", 0.0))
             self.cmb_ls.setCurrentIndex(max(0, self.cmb_ls.findData(
@@ -657,6 +674,7 @@ class OverlayTab(FigureTab):
         e = self.current_entry()
         if self._loading or e is None:
             return
+        e.update(struct_color=self.cb_ecolor.isChecked())
         e.update(own_norm=self.cb_own.isChecked(), nlo=self.sp_elo.value(), nhi=self.sp_ehi.value(),
                  scale=self.sp_scale.value(), offset=self.sp_offset.value(),
                  ls=self.cmb_ls.currentData(), lw=self.sp_lw.value() or None)
@@ -673,6 +691,24 @@ class OverlayTab(FigureTab):
         self.st.update(mode=self.cmb_mode.currentData(), nlo=self.sp_nlo.value(), nhi=self.sp_nhi.value(),
                        baseline=self.cb_base.isChecked(), sticks=self.cb_sticks.isChecked(),
                        stick_mode=self.cmb_stick.currentData())
+
+    def choose_entry_structure(self):
+        e = self.current_entry()
+        if e is None or not self.main.ensure_project():
+            return
+        p, _ = QFileDialog.getOpenFileName(self, T("dlg_structure"), self.main.settings.value("last_img_dir", ""),
+                                           f"{T('flt_struct')};;{T('flt_all')}")
+        if p:
+            self.main.settings.setValue("last_img_dir", str(Path(p).parent))
+            self.set_entry_structure(self.main.import_file(p, "images"))
+
+    def set_entry_structure(self, p):
+        e = self.current_entry()
+        if e is None:
+            return
+        e["structure"] = p
+        self.lbl_estruct.setText(Path(p).name if p else "–")
+        self.timer.start()
 
     def choose_structure(self):
         if not self.main.ensure_project():
@@ -731,22 +767,23 @@ class OverlayTab(FigureTab):
                 key = ("tddft", e["file"], e.get("variant"))
                 r = self.cache(key, lambda e=e: X.parse_tddft(e["file"], e.get("variant")))
                 lam, eps, sl, sh = X.broaden(r["E"], r["f"], e.get("fwhm", 0.3), e.get("shift", 0.0))
-                sel = (lam >= min(lo, hi)) & (lam <= max(lo, hi))
-                band_max = eps[sel].max() if sel.any() and eps[sel].max() > 0 else eps.max()
+                # Kurve und Striche immer mit DEMSELBEN Faktor: jeder Strich = Höhe seiner eigenen
+                # Gaußbande, die Kurve ist deren Summe. Gewählt wird nur die Bezugsgröße.
                 if eps_mode:
-                    y, h, top = eps / 1000.0, sh / 1000.0, band_max / 1000.0
+                    k = 1 / 1000.0                       # ε in 10³ M⁻¹ cm⁻¹
                 else:
-                    y, h, top = eps / band_max, sh / band_max, 1.0
+                    sel = (lam >= min(lo, hi)) & (lam <= max(lo, hi))
+                    band_max = eps[sel].max() if sel.any() and eps[sel].max() > 0 else eps.max()
+                    ssel = (sl >= min(lo, hi)) & (sl <= max(lo, hi))
+                    stick_max = sh[ssel].max() if ssel.any() and sh[ssel].max() > 0 else sh.max()
+                    k = 1 / (stick_max if mode == "max" else band_max)
+                y, h = eps * k, sh * k
                 c = {"x": lam, "y": y * sc + off, "color": e["color"], "label": e["label"], "ls": ls}
                 if st["sticks"]:
                     if mode == "faxis":                 # Oszillatorstärken auf rechter Achse
                         sticks.append({"x": sl, "h": np.asarray(r["f"], float), "color": e["color"],
                                        "axis2": True})
                     else:
-                        if mode == "max":               # stärkster Strich im Fenster = Bandenmaximum
-                            ssel = (sl >= min(lo, hi)) & (sl <= max(lo, hi))
-                            hmax = h[ssel].max() if ssel.any() and h[ssel].max() > 0 else h.max()
-                            h = h / hmax * top if hmax > 0 else h
                         sticks.append({"x": sl, "h": h * sc, "color": e["color"], "base": off})
             if e.get("lw"):
                 c["lw"] = e["lw"]
@@ -777,6 +814,17 @@ class OverlayTab(FigureTab):
         if st.get("structure") and Path(st["structure"]).exists():
             imgs.append({"file": st["structure"], "id": "struktur", "width": st.get("struct_w", 20) / 100,
                          "prefer": "top", "_asset": self.structure_asset(st["structure"])})
+        for e in vis:                                   # Struktur pro Spektrum, optional in Kurvenfarbe
+            p = e.get("structure")
+            if p and Path(p).exists():
+                color = e["color"] if e.get("struct_color", True) else None
+                try:
+                    asset = self.structure_asset(p, color)
+                except Exception as ex:
+                    self.main.log_signal.emit(f"  {Path(p).name}: {ex}")
+                    continue
+                imgs.append({"file": p, "id": "struktur_" + e.get("uid", "x"),
+                             "width": st.get("struct_w", 20) / 100, "prefer": "top", "_asset": asset})
         cfg["images"] = imgs
         return cfg, curves, [], sticks
 

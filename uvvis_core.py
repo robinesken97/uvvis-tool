@@ -1088,7 +1088,11 @@ class Figure:
                 pos = hit or find(key, w, h, corner_score(im.get("prefer", "auto"))) or (0.5, 0.5)
             else:
                 if len(pos) == 4:
-                    w, h = pos[2], pos[3]
+                    # nur die Breite übernehmen; die Höhe folgt immer aus dem Seitenverhältnis des Bildes
+                    # (sonst Verzerrung, wenn sich Bild oder Achsengröße geändert haben)
+                    ratio = h / w if w else 1.0
+                    w = pos[2]
+                    h = w * ratio
                 pos = pos[:2]
             self._set_axes_af(a, pos[0], pos[1], w, h)
             fs.block_rect(pos[0], pos[1], w, h)
