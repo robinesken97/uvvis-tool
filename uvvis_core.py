@@ -85,6 +85,7 @@ DEFAULTS = {
         "show_error": False,
         "eps_digits": "auto",                # auto = nach Unsicherheit runden, oder int = sign. Stellen
         "eps_unit": r"cm$^{-1}$ M$^{-1}$",
+        "mark_shoulders": False,             # „(sh)“ an Schultern in der Abbildung
         "font_size": 15,
         "pos": {},                           # optional fest: {336: [x, y]} in Achsenbruchteilen
     },
@@ -142,6 +143,11 @@ def clip_polyline(x, y, xlim, ylim):
         out_x.append(xb)
         out_y.append(yb if y0 <= yb <= y1 else np.nan)
     return np.array(out_x), np.array(out_y)
+
+
+def safe_name(name):
+    """Datei-/Ordnername ohne problematische Zeichen."""
+    return re.sub(r'[\\/:*?"<>|]+', "_", str(name)).strip() or "serie"
 
 
 def apply_export_size(cfg, w_cm, h_cm):
@@ -497,6 +503,60 @@ def abs_at(x, y, lam, win):
 # ----------------------------------------------------------------------------
 # Auswertung
 # ----------------------------------------------------------------------------
+def _betacf(a, b, x, itmax=200, eps=3e-14):
+    """Kettenbruch für die regularisierte unvollständige Betafunktion (Numerical Recipes)."""
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > 1e-300 else 1e-300)
+    h = d
+    for m in range(1, itmax + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > 1e-300 else 1e-300)
+        c = 1.0 + aa / c if abs(1.0 + aa / c) > 1e-300 else 1e-300
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        d = 1.0 / (d if abs(d) > 1e-300 else 1e-300)
+        c = 1.0 + aa / c if abs(1.0 + aa / c) > 1e-300 else 1e-300
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < eps:
+            break
+    return h
+
+
+def _betai(a, b, x):
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    lbt = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log(1 - x)
+    if x < (a + 1) / (a + b + 2):
+        return math.exp(lbt) * _betacf(a, b, x) / a
+    return 1.0 - math.exp(lbt) * _betacf(b, a, 1 - x) / b
+
+
+def t_quantile(p, df):
+    """Quantil der Student-t-Verteilung (z. B. p = 0.975 für ein zweiseitiges 95 %-Intervall)."""
+    if df <= 0:
+        return float("nan")
+
+    def cdf(t):
+        x = df / (df + t * t)
+        tail = 0.5 * _betai(df / 2.0, 0.5, x)
+        return 1.0 - tail if t > 0 else tail
+    lo, hi = 0.0, 1e3
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if cdf(mid) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 def linfit(x, y, intercept=True):
     x = np.asarray(x, float)
     y = np.asarray(y, float)
@@ -582,6 +642,9 @@ def evaluate(cfg, spectra):
         if fit:
             r["eps"] = fit["slope"] / fac
             r["eps_err"] = fit["se_slope"] / fac
+            dof = fit["n"] - (2 if cfg["fit_intercept"] else 1)
+            r["t95"] = t_quantile(0.975, dof) if dof > 0 else float("nan")
+            r["eps_ci95"] = r["t95"] * r["eps_err"] if np.isfinite(r["eps_err"]) else float("nan")
             warn = []
             if fit["n"] < 4:
                 warn.append(T("few_points", n=fit["n"]))
@@ -599,15 +662,15 @@ def write_results(results, path, cfg):
         w = csv.writer(f)
         w.writerow(["lambda_nm", "n_used", "n_excluded", f"slope_cm-1_{cu}-1", "se_slope",
                     "intercept_cm-1", "se_intercept", "R2", "RSS",
-                    "eps_M-1cm-1" if conc_factor(cfg) else "a_L_g-1_cm-1", "err", "warnings"])
+                    "eps_M-1cm-1" if conc_factor(cfg) else "a_L_g-1_cm-1", "err", "ci95", "warnings"])
         for r in results:
             ft = r["fit"]
             if not ft:
-                w.writerow([r["lam"], len(r["used"]), len(r["excluded"])] + [""] * 8 + ["kein Fit"])
+                w.writerow([r["lam"], len(r["used"]), len(r["excluded"])] + [""] * 9 + ["kein Fit"])
                 continue
             w.writerow([r["lam"], ft["n"], len(r["excluded"]), ft["slope"], ft["se_slope"],
                         ft["intercept"], ft["se_intercept"], ft["r2"], ft["rss"],
-                        r["eps"], r["eps_err"], " | ".join(r["warnings"])])
+                        r["eps"], r["eps_err"], r.get("eps_ci95"), " | ".join(r["warnings"])])
 
 
 def print_results(results, cfg):
@@ -814,7 +877,8 @@ class Figure:
         d = self.cfg["path_length_cm"]
         for i, r in enumerate(fits):
             col = cols[i % len(cols)]
-            base = f"{r['lam']:g} nm" + (" (sh)" if r.get("shoulder") else "")
+            mark = r.get("shoulder") and self.cfg["labels"].get("mark_shoulders")
+            base = f"{r['lam']:g} nm" + (" (sh)" if mark else "")
             with_r2 = f"{base}   $R^2$ = {r['fit']['r2']:.4f}" if r["fit"] else base
             self._legend_labels.append((base, with_r2))
             # R² nur in der Legende, wenn es nicht schon in der Inset-Tabelle steht
@@ -880,7 +944,7 @@ class Figure:
             v, e = fmt_ve(r["eps"], r["eps_err"], lcfg["eps_digits"], eps_max_decimals(self.cfg))
             eps = f"({v} ± {e})" if (lcfg["show_error"] and e) else v
             sym, unit = coeff_symbol_unit(self.cfg)
-            sh = " (sh)" if r.get("shoulder") else ""
+            sh = " (sh)" if (r.get("shoulder") and lcfg.get("mark_shoulders")) else ""
             txt = f"λ =  {r['lam']:g} nm{sh}\n{sym} =  {eps} {unit}"
             if self.cfg["r2_mode"] == "label":
                 txt += f"\n$R^2$ =  {r['fit']['r2']:.4f}"
@@ -1331,6 +1395,7 @@ def prepare_series(cfg, spectra, tag=""):
     if cfg["conc_unit"] == "mg/mL" and not cfg.get("molar_mass_g_mol"):
         log("  " + T("no_mw"))
     bl = apply_baseline(spectra, cfg)                 # Basislinie immer aus dem vollen Datenbereich
+    cfg["_baseline_info"] = bl
     lo, hi = cfg["peak_range_nm"]
     if bl:
         hi = min(hi if hi is not None else np.inf, bl["window"][0] - 10)

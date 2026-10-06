@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QColorDialog, QComb
 import uvvis_core as core
 import uvvis_extra as X
 import uvvis_images as IMG
+import uvvis_project as PRJ
 from uvvis_i18n import T
 
 PREVIEW_DPI = 90
@@ -120,7 +121,7 @@ class FigureTab(QWidget):
         ls = QScrollArea()
         ls.setWidget(left)
         ls.setWidgetResizable(True)
-        ls.setMinimumWidth(400)
+        ls.setMinimumWidth(480)
         cs = QScrollArea()
         holder = QWidget()
         hl = QHBoxLayout(holder)
@@ -184,6 +185,37 @@ class FigureTab(QWidget):
             cb.toggled.connect(self.changed)
         self._sync_common()
         return g
+
+    def size_spin(self, form, key, layout_key, lo=3.0, hi=90.0):
+        """Größenfeld (% der Plotbreite) für ein Bild; Mausrad im Plot hält es aktuell."""
+        sp = QDoubleSpinBox(decimals=1, minimum=lo, maximum=hi, singleStep=1, suffix=" %",
+                            value=self.st.get(key, 20.0))
+        self._size_spins = getattr(self, "_size_spins", {})
+        self._size_spins[layout_key] = (sp, key)
+
+        def changed(v):
+            if self._loading:
+                return
+            self.st[key] = v
+            lay = self.layout()
+            if layout_key in lay and len(lay[layout_key]) == 4:
+                x, y, w, h = lay[layout_key]
+                nw = v / 100
+                nh = h * nw / w
+                lay[layout_key] = [min(max(x + (w - nw) / 2, 0), max(0, 1 - nw)),
+                                   min(max(y + (h - nh) / 2, 0), max(0, 1 - nh)), nw, nh]
+            self.timer.start()
+        sp.valueChanged.connect(changed)
+        form.addRow(T("img_size"), sp)
+        return sp
+
+    def sync_sizes(self, layout):
+        for lk, (sp, key) in getattr(self, "_size_spins", {}).items():
+            if lk in layout and len(layout[lk]) == 4:
+                self.st[key] = round(layout[lk][2] * 100, 1)
+                sp.blockSignals(True)
+                sp.setValue(self.st[key])
+                sp.blockSignals(False)
 
     def _sync_common(self):
         auto = self.cb_xauto.isChecked()
@@ -289,26 +321,34 @@ class FigureTab(QWidget):
                 self.fig.text(0.5, 0.5, T("tab_empty"), ha="center", va="center", color="gray")
             else:
                 self.dragger = TabDragger(self.F, self.layout_changed)
+                self.sync_sizes(self.F.current_layout())
             self.canvas.draw_idle()
+            self.main.push_undo()
         except Exception as e:
             self.main.log_signal.emit(traceback.format_exc())
             self.main.statusBar().showMessage(f"{T('err_title')}: {e}", 8000)
 
     def layout_changed(self, layout):
         self.st["layout"][self.size_key()] = layout
+        self.sync_sizes(layout)
+        self.main.push_undo()
 
     def reset_layout(self):
         self.st["layout"][self.size_key()] = {}
         self.render()
 
     def export_dialog(self):
-        start = self.main.settings.value("last_export_dir", str(Path.home()))
-        p, _ = QFileDialog.getSaveFileName(self, T("btn_export"), str(Path(start) / self.STATE_KEY),
-                                           "PDF/SVG/PNG (*.pdf *.svg *.png)")
-        if p:
-            self.main.settings.setValue("last_export_dir", str(Path(p).parent))
-            out = self.export_to(Path(p).with_suffix(""))
-            self.main.info(T("exported_to", p="\n".join(map(str, out))))
+        """Direkt ins Projekt: exports/<overlay|fluorescence>/<Projekt>_<Tab>.* (wird überschrieben)."""
+        if not self.main.ensure_project():
+            return
+        pdir = Path(self.main.project_dir)
+        base = PRJ.export_dir(pdir, self.STATE_KEY) / f"{pdir.name}_{self.STATE_KEY}"
+        try:
+            out = self.export_to(base)
+        except Exception as e:
+            return self.main.error(str(e))
+        self.main.info(T("exported_to", p=str(base.parent)))
+        return out
 
     def export_to(self, base: Path):
         base = Path(base).resolve()
@@ -345,7 +385,7 @@ COMMON_DEFAULTS = {"x_auto": True, "x_min": 200.0, "x_max": 800.0, "size": "half
 class OverlayTab(FigureTab):
     STATE_KEY = "overlay"
     DEFAULT_STATE = dict(COMMON_DEFAULTS, entries=[], mode="norm", nlo=300.0, nhi=500.0, ymax=0.0,
-                         baseline=True, sticks=True, structure=None)
+                         baseline=True, sticks=True, stick_mode="max", structure=None, struct_w=20.0)
 
     def build_controls(self):
         st = self.st
@@ -353,6 +393,7 @@ class OverlayTab(FigureTab):
         v = QVBoxLayout(g)
         row = QHBoxLayout()
         for txt, fn in ((T("ov_add_exp"), self.add_exp), (T("ov_add_calc"), self.add_calc),
+                        ("↑", lambda: self.move_selected(-1)), ("↓", lambda: self.move_selected(1)),
                         (T("remove"), self.remove_selected)):
             b = QPushButton(txt)
             b.clicked.connect(fn)
@@ -402,8 +443,31 @@ class OverlayTab(FigureTab):
         self.sp_shift = QDoubleSpinBox(decimals=2, minimum=-3, maximum=3, singleStep=0.05, value=0.0, suffix=" eV")
         self.lbl_shift = QLabel(T("ov_shift"))
         f.addRow(self.lbl_shift, self.sp_shift)
-        for w in (self.sp_elo, self.sp_ehi, self.sp_d, self.sp_fwhm, self.sp_shift):
+        self.cmb_soc = QComboBox()
+        self.lbl_soc = QLabel(T("ov_soc"))
+        f.addRow(self.lbl_soc, self.cmb_soc)
+        row = QHBoxLayout()
+        self.sp_scale = QDoubleSpinBox(decimals=3, minimum=0.001, maximum=1000, singleStep=0.05, value=1.0)
+        self.sp_offset = QDoubleSpinBox(decimals=3, minimum=-1000, maximum=1000, singleStep=0.05, value=0.0)
+        row.addWidget(QLabel("×"))
+        row.addWidget(self.sp_scale)
+        row.addWidget(QLabel("+"))
+        row.addWidget(self.sp_offset)
+        f.addRow(T("ov_scale_offset"), row)
+        row = QHBoxLayout()
+        self.cmb_ls = QComboBox()
+        for key in ("solid", "dashed", "dotted", "dashdot"):
+            self.cmb_ls.addItem(T("ls_" + key), key)
+        self.sp_lw = QDoubleSpinBox(decimals=1, minimum=0.0, maximum=6, singleStep=0.25, value=0.0, suffix=" pt")
+        self.sp_lw.setSpecialValueText(T("auto"))
+        row.addWidget(self.cmb_ls, 1)
+        row.addWidget(self.sp_lw)
+        f.addRow(T("ov_line"), row)
+        for w in (self.sp_elo, self.sp_ehi, self.sp_d, self.sp_fwhm, self.sp_shift, self.sp_scale,
+                  self.sp_offset, self.sp_lw):
             w.valueChanged.connect(self.detail_changed)
+        self.cmb_ls.currentIndexChanged.connect(self.detail_changed)
+        self.cmb_soc.currentIndexChanged.connect(self.detail_changed)
         self.cb_own.toggled.connect(self.detail_changed)
         self.cmb_unit.currentIndexChanged.connect(self.detail_changed)
         self.ed_conc.editingFinished.connect(self.detail_changed)
@@ -429,6 +493,12 @@ class OverlayTab(FigureTab):
         self.cb_sticks.setChecked(st["sticks"])
         f.addRow(self.cb_base)
         f.addRow(self.cb_sticks)
+        self.cmb_stick = QComboBox()
+        for key in ("max", "band", "faxis"):
+            self.cmb_stick.addItem(T("stick_" + key), key)
+        self.cmb_stick.setCurrentIndex(max(0, self.cmb_stick.findData(st.get("stick_mode", "max"))))
+        f.addRow(T("stick_mode"), self.cmb_stick)
+        self.cmb_stick.currentIndexChanged.connect(self.changed)
         row = QHBoxLayout()
         self.lbl_struct = QLabel(Path(st["structure"]).name if st["structure"] else "–")
         b1 = QPushButton(T("choose"))
@@ -439,6 +509,7 @@ class OverlayTab(FigureTab):
         row.addWidget(b1)
         row.addWidget(b2)
         f.addRow(T("structure"), row)
+        self.sp_struct_w = self.size_spin(f, "struct_w", "image_struktur")
         self.cmb_mode.currentIndexChanged.connect(self.changed)
         for w in (self.sp_nlo, self.sp_nhi):
             w.valueChanged.connect(self.changed)
@@ -457,10 +528,13 @@ class OverlayTab(FigureTab):
         return PALETTE[len(self.st["entries"]) % len(PALETTE)]
 
     def add_exp(self):
+        if not self.main.ensure_project():
+            return
         ps, _ = QFileDialog.getOpenFileNames(self, T("ov_add_exp"), self.main.settings.value("last_dir", ""),
                                              f"{T('flt_csv')};;{T('flt_all')}")
         for p in ps:
             try:
+                p = self.main.import_file(p, "data")
                 for s_ in self.samples(p):
                     self.st["entries"].append({
                         "kind": "exp", "file": p, "sample": s_["key"], "label": s_["name"],
@@ -473,10 +547,13 @@ class OverlayTab(FigureTab):
         self.timer.start()
 
     def add_calc(self):
+        if not self.main.ensure_project():
+            return
         ps, _ = QFileDialog.getOpenFileNames(self, T("ov_add_calc"), self.main.settings.value("last_dir", ""),
                                              "ORCA / Gaussian (*.out *.log *.txt);;" + T("flt_all"))
         for p in ps:
             try:
+                p = self.main.import_file(p, "data")
                 r = self.cache(("tddft", p), lambda p=p: X.parse_tddft(p))
                 self.main.log_signal.emit(f"  {Path(p).name}: {r['program']}, {len(r['E'])} {T('ov_states')}")
                 self.st["entries"].append({
@@ -487,6 +564,15 @@ class OverlayTab(FigureTab):
                 self.main.error(str(e))
         self.fill_table()
         self.timer.start()
+
+    def move_selected(self, d):
+        r = self.table.currentRow()
+        ents = self.st["entries"]
+        if 0 <= r < len(ents) and 0 <= r + d < len(ents):
+            ents[r], ents[r + d] = ents[r + d], ents[r]
+            self.fill_table()
+            self.table.selectRow(r + d)
+            self.timer.start()
 
     def remove_selected(self):
         r = self.table.currentRow()
@@ -536,9 +622,14 @@ class OverlayTab(FigureTab):
         exp = e is not None and e["kind"] == "exp"
         for w in (self.lbl_conc, self.ed_conc, self.cmb_unit, self.lbl_mw, self.ed_mw, self.lbl_d, self.sp_d):
             w.setVisible(exp or e is None)
-        for w in (self.lbl_fwhm, self.sp_fwhm, self.lbl_shift, self.sp_shift):
+        for w in (self.lbl_fwhm, self.sp_fwhm, self.lbl_shift, self.sp_shift, self.lbl_soc, self.cmb_soc):
             w.setVisible(e is not None and not exp)
         if e:
+            self.sp_scale.setValue(e.get("scale", 1.0))
+            self.sp_offset.setValue(e.get("offset", 0.0))
+            self.cmb_ls.setCurrentIndex(max(0, self.cmb_ls.findData(
+                e.get("ls", "dashed" if e["kind"] == "calc" else "solid"))))
+            self.sp_lw.setValue(e.get("lw") or 0.0)
             self.cb_own.setChecked(e["own_norm"])
             self.sp_elo.setValue(e["nlo"])
             self.sp_ehi.setValue(e["nhi"])
@@ -550,29 +641,46 @@ class OverlayTab(FigureTab):
             else:
                 self.sp_fwhm.setValue(e.get("fwhm", 0.3))
                 self.sp_shift.setValue(e.get("shift", 0.0))
+                self.cmb_soc.clear()
+                try:
+                    variants = self.cache(("tdv", e["file"]), lambda: X.tddft_variants(e["file"]))
+                except Exception:
+                    variants = []
+                for v in variants or ["nosoc"]:
+                    self.cmb_soc.addItem(T("soc_" + v), v)
+                cur = e.get("variant") or (variants[0] if variants else "nosoc")
+                self.cmb_soc.setCurrentIndex(max(0, self.cmb_soc.findData(cur)))
+                self.cmb_soc.setEnabled(len(variants) > 1)
         self._loading = False
 
     def detail_changed(self, *_):
         e = self.current_entry()
         if self._loading or e is None:
             return
-        e.update(own_norm=self.cb_own.isChecked(), nlo=self.sp_elo.value(), nhi=self.sp_ehi.value())
+        e.update(own_norm=self.cb_own.isChecked(), nlo=self.sp_elo.value(), nhi=self.sp_ehi.value(),
+                 scale=self.sp_scale.value(), offset=self.sp_offset.value(),
+                 ls=self.cmb_ls.currentData(), lw=self.sp_lw.value() or None)
         if e["kind"] == "exp":
             e.update(conc=parse_num(self.ed_conc.text()), unit=self.cmb_unit.currentData(),
                      mw=parse_num(self.ed_mw.text()), d=self.sp_d.value())
         else:
             e.update(fwhm=self.sp_fwhm.value(), shift=self.sp_shift.value())
+            if self.cmb_soc.currentData():
+                e["variant"] = self.cmb_soc.currentData()
         self.timer.start()
 
     def collect(self):
         self.st.update(mode=self.cmb_mode.currentData(), nlo=self.sp_nlo.value(), nhi=self.sp_nhi.value(),
-                       baseline=self.cb_base.isChecked(), sticks=self.cb_sticks.isChecked())
+                       baseline=self.cb_base.isChecked(), sticks=self.cb_sticks.isChecked(),
+                       stick_mode=self.cmb_stick.currentData())
 
     def choose_structure(self):
+        if not self.main.ensure_project():
+            return
         p, _ = QFileDialog.getOpenFileName(self, T("dlg_structure"), self.main.settings.value("last_img_dir", ""),
                                            f"{T('flt_struct')};;{T('flt_all')}")
         if p:
-            self.set_structure(p)
+            self.set_structure(self.main.import_file(p, "images"))
 
     def set_structure(self, p):
         self.st["structure"] = p
@@ -580,6 +688,8 @@ class OverlayTab(FigureTab):
         self.timer.start()
 
     # -- Abbildung --------------------------------------------------------------
+    LS = {"solid": "-", "dashed": "--", "dotted": ":", "dashdot": "-."}
+
     def figure_spec(self):
         st = self.st
         vis = [e for e in st["entries"] if e["visible"]]
@@ -587,9 +697,12 @@ class OverlayTab(FigureTab):
             return None
         cfg = self.base_cfg()
         eps_mode = st["mode"] == "eps"
+        mode = st.get("stick_mode", "max")
         curves, sticks, exp_x = [], [], []
         for e in vis:
             lo, hi = (e["nlo"], e["nhi"]) if e["own_norm"] else (st["nlo"], st["nhi"])
+            sc, off = e.get("scale", 1.0), e.get("offset", 0.0)
+            ls = self.LS.get(e.get("ls") or ("dashed" if e["kind"] == "calc" else "solid"), "-")
             if e["kind"] == "exp":
                 s_ = self.sample(e["file"], e["sample"])
                 if s_ is None:
@@ -613,19 +726,31 @@ class OverlayTab(FigureTab):
                         self.main.log_signal.emit("  " + T("ov_no_signal", name=e["label"], lo=lo, hi=hi))
                         continue
                 exp_x.append(x)
-                curves.append({"x": x, "y": y, "color": e["color"], "label": e["label"]})
+                c = {"x": x, "y": y * sc + off, "color": e["color"], "label": e["label"], "ls": ls}
             else:
-                r = self.cache(("tddft", e["file"]), lambda e=e: X.parse_tddft(e["file"]))
+                key = ("tddft", e["file"], e.get("variant"))
+                r = self.cache(key, lambda e=e: X.parse_tddft(e["file"], e.get("variant")))
                 lam, eps, sl, sh = X.broaden(r["E"], r["f"], e.get("fwhm", 0.3), e.get("shift", 0.0))
+                sel = (lam >= min(lo, hi)) & (lam <= max(lo, hi))
+                band_max = eps[sel].max() if sel.any() and eps[sel].max() > 0 else eps.max()
                 if eps_mode:
-                    y, h = eps / 1000.0, sh / 1000.0
+                    y, h, top = eps / 1000.0, sh / 1000.0, band_max / 1000.0
                 else:
-                    sel = (lam >= min(lo, hi)) & (lam <= max(lo, hi))
-                    m = eps[sel].max() if sel.any() and eps[sel].max() > 0 else eps.max()
-                    y, h = eps / m, sh / m
-                curves.append({"x": lam, "y": y, "color": e["color"], "label": e["label"], "ls": "--"})
+                    y, h, top = eps / band_max, sh / band_max, 1.0
+                c = {"x": lam, "y": y * sc + off, "color": e["color"], "label": e["label"], "ls": ls}
                 if st["sticks"]:
-                    sticks.append({"x": sl, "h": h, "color": e["color"]})
+                    if mode == "faxis":                 # Oszillatorstärken auf rechter Achse
+                        sticks.append({"x": sl, "h": np.asarray(r["f"], float), "color": e["color"],
+                                       "axis2": True})
+                    else:
+                        if mode == "max":               # stärkster Strich im Fenster = Bandenmaximum
+                            ssel = (sl >= min(lo, hi)) & (sl <= max(lo, hi))
+                            hmax = h[ssel].max() if ssel.any() and h[ssel].max() > 0 else h.max()
+                            h = h / hmax * top if hmax > 0 else h
+                        sticks.append({"x": sl, "h": h * sc, "color": e["color"], "base": off})
+            if e.get("lw"):
+                c["lw"] = e["lw"]
+            curves.append(c)
         if not curves:
             return None
         if st["x_auto"]:
@@ -637,19 +762,21 @@ class OverlayTab(FigureTab):
                 cfg["xlim"] = [max(150.0, sx.min() - 80), sx.max() + 120]
         else:
             cfg["xlim"] = [st["x_min"], st["x_max"]]
+        lo_x, hi_x = cfg["xlim"]
+        ymin = min(0.0, min(float(np.nanmin(c["y"][(c["x"] >= lo_x) & (c["x"] <= hi_x)], initial=0))
+                            for c in curves))
         if st["ymax"] > 0:
-            cfg["ylim"] = [0, st["ymax"]]
+            cfg["ylim"] = [ymin, st["ymax"]]
         elif eps_mode:
-            lo_x, hi_x = cfg["xlim"]
             mx = max(np.nanmax(c["y"][(c["x"] >= lo_x) & (c["x"] <= hi_x)], initial=0) for c in curves)
-            cfg["ylim"] = [0, 1.1 * mx if mx > 0 else 1]
-        else:
-            cfg["ylim"] = [0, 1.1]
+            cfg["ylim"] = [ymin, 1.1 * mx if mx > 0 else 1]
+        else:                                    # normiert: Platz für skalierte/versetzte Kurven
+            cfg["ylim"] = [ymin, max(1.1, max(1.1 * e.get("scale", 1.0) + e.get("offset", 0.0) for e in vis))]
         cfg["ylabel"] = r"$\varepsilon$ [10$^3$ M$^{-1}$ cm$^{-1}$]" if eps_mode else "normalized absorbance [a.u.]"
         imgs = []
         if st.get("structure") and Path(st["structure"]).exists():
-            imgs.append({"file": st["structure"], "id": "struktur", "width": 0.2, "prefer": "top",
-                         "_asset": self.structure_asset(st["structure"])})
+            imgs.append({"file": st["structure"], "id": "struktur", "width": st.get("struct_w", 20) / 100,
+                         "prefer": "top", "_asset": self.structure_asset(st["structure"])})
         cfg["images"] = imgs
         return cfg, curves, [], sticks
 
@@ -660,7 +787,7 @@ class FluoTab(FigureTab):
     DEFAULT_STATE = dict(COMMON_DEFAULTS, abs_file=None, abs_sample=None, em_file=None, em_sample=None,
                          ex=350.0, alo=300.0, ahi=500.0, eps="", mask=False, c_abs="#1f9bff",
                          c_em="#e8231b", structure=None, photo_day=None, bg_day="auto", photo_uv=None,
-                         bg_uv="none", ymax=1.2)
+                         bg_uv="none", ymax=1.2, struct_w=20.0, photo_w=30.0)
 
     def build_controls(self):
         st = self.st
@@ -694,10 +821,12 @@ class FluoTab(FigureTab):
         g = QGroupBox(T("fl_images"))
         f = QFormLayout(g)
         self.lbl_struct = self._img_row(f, T("structure"), "structure", T("flt_struct"))
+        self.size_spin(f, "struct_w", "image_struktur")
         self.lbl_day = self._img_row(f, T("fl_photo_day"), "photo_day", T("flt_photo"))
         self.cmb_bg_day = self._bg_combo(f, "bg_day")
         self.lbl_uv = self._img_row(f, T("fl_photo_uv"), "photo_uv", T("flt_photo"))
         self.cmb_bg_uv = self._bg_combo(f, "bg_uv")
+        self.size_spin(f, "photo_w", "image_fotos")
         self.lv.addWidget(g)
         for w in (self.sp_ex, self.sp_alo, self.sp_ahi):
             w.valueChanged.connect(self.changed)
@@ -731,10 +860,13 @@ class FluoTab(FigureTab):
             cmb.blockSignals(False)
 
         def choose():
+            if not self.main.ensure_project():
+                return
             p, _ = QFileDialog.getOpenFileName(self, label, self.main.settings.value("last_dir", ""),
                                                f"{T('flt_csv')};;{T('flt_all')}")
             if p:
                 try:
+                    p = self.main.import_file(p, "data")
                     self.samples(p)
                 except Exception as e:
                     return self.main.error(f"{Path(p).name}: {e}")
@@ -770,10 +902,13 @@ class FluoTab(FigureTab):
         b1, b2 = QPushButton(T("choose")), QPushButton(T("remove"))
 
         def choose():
+            if not self.main.ensure_project():
+                return
             p, _ = QFileDialog.getOpenFileName(self, label, self.main.settings.value("last_img_dir", ""),
                                                f"{flt};;{T('flt_all')}")
             if p:
                 self.main.settings.setValue("last_img_dir", str(Path(p).parent))
+                p = self.main.import_file(p, "images")
                 self.st[key] = p
                 lbl.setText(Path(p).name)
                 self.timer.start()
@@ -844,17 +979,17 @@ class FluoTab(FigureTab):
         cfg["ylabel"] = "normalized intensity [a.u.]"
         imgs = []
         if st.get("structure") and Path(st["structure"]).exists():
-            imgs.append({"file": st["structure"], "id": "struktur", "width": 0.2, "prefer": "top",
-                         "_asset": self.structure_asset(st["structure"])})
+            imgs.append({"file": st["structure"], "id": "struktur", "width": st.get("struct_w", 20) / 100,
+                         "prefer": "top", "_asset": self.structure_asset(st["structure"])})
         day = self.photo_asset(st["photo_day"], st["bg_day"]) if st.get("photo_day") else None
         uv = self.photo_asset(st["photo_uv"], st["bg_uv"]) if st.get("photo_uv") else None
         if day and uv:
             pair = X.compose_photo_pair(day["rgba"], uv["rgba"], f"{st['ex']:g} nm")
-            imgs.append({"file": "pair", "id": "fotos", "width": 0.3, "prefer": "bottom-right",
+            imgs.append({"file": "pair", "id": "fotos", "width": st.get("photo_w", 30) / 100, "prefer": "bottom-right",
                          "_asset": {"rgba": pair, "pdf": None, "clip": None}})
         elif day or uv:
             one = day or uv
-            imgs.append({"file": "photo", "id": "foto", "width": 0.09, "prefer": "bottom-right",
+            imgs.append({"file": "photo", "id": "fotos", "width": st.get("photo_w", 30) / 300, "prefer": "bottom-right",
                          "_asset": {"rgba": one["rgba"], "pdf": None, "clip": None}})
         cfg["images"] = imgs
         return cfg, curves, labels, []

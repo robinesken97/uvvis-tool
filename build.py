@@ -20,6 +20,7 @@ args = [
     "--collect-all", "onnxruntime",
     "--hidden-import", "parseuv_lite",
     "--hidden-import", "olefile",
+    "--hidden-import", "openpyxl",
     "--hidden-import", "matplotlib.backends.backend_qtagg",
     "--hidden-import", "matplotlib.backends.backend_agg",
     "--hidden-import", "matplotlib.backends.backend_pdf",

@@ -27,7 +27,7 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
 
 ## Ablauf
 
-1. **Daten öffnen:** Datei → Öffnen, oder Dateien ins Fenster ziehen. Unterstützt werden
+1. **Daten öffnen:** Datei → Messdaten öffnen, oder Dateien ins Fenster ziehen. Unterstützt werden
    Cary-CSV/TXT-Exporte und die gerätenahen **.DSW/.BSW**-Dateien. **Mehrere Dateien auf einmal**
    (z. B. jede Konzentration einzeln gemessen) werden zu einem Datensatz zusammengeführt.
 2. **Konzentrationen:** Die Konzentrationen werden aus den Probennamen gelesen, z. B.
@@ -55,8 +55,8 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
      L g⁻¹ cm⁻¹ statt ε aus, und das Feld wird rot markiert. Bei mM/µM wird die Molmasse nicht verwendet.
 4. **Auswertung:** Schichtdicke und Fit-Cutoff eintragen. Banden werden automatisch gefunden;
    zusätzliche Banden (z. B. Schultern) lassen sich als Liste eintragen („zusätzlich zu den
-   automatisch gefundenen“ behält beide), und **„Schultern automatisch suchen“** ergänzt Schultern,
-   markiert mit „(sh)“. In der Ergebnistabelle entscheidet das Häkchen bei λ, ob eine Bande im Bild
+   automatisch gefundenen“ behält beide), und **„Schultern automatisch suchen“** ergänzt Schultern
+   (in der Abbildung optional mit „(sh)“ markiert). In der Ergebnistabelle entscheidet das Häkchen bei λ, ob eine Bande im Bild
    erscheint, und ein Doppelklick auf **„Cutoff A“** setzt einen eigenen Cutoff für diese Bande
    (z. B. um einen Punkt knapp über A = 1 mitzunehmen). Banden mit eigenem Cutoff sind farbig
    hinterlegt; optional zeigt das Inset ausgeschlossene Punkte als offene Symbole.
@@ -64,16 +64,49 @@ Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` fun
    - **Mit der Maus ziehen:** Inset, Struktur, Küvette und jedes λ/ε-Label lassen sich verschieben.
    - **Mausrad bzw. Trackpad** über Inset oder Bild ändert die Größe. Alternativ die Felder „Größe [% Plotbreite]“ nutzen.
    - „Layout zurücksetzen“ stellt die automatische Anordnung wieder her.
-6. **Exportieren:** Datei → Exportieren (oder der Knopf). Das schreibt die gewählten Formate (PDF/SVG/PNG)
-   und `<name>_results.csv` für **alle** Serien in einen wählbaren Ordner.
+6. **Exportieren:** Datei → Exportieren (oder der Knopf). Das schreibt die gewählten Formate (PDF/SVG/PNG),
+   `<Serie>_results.csv` und den Excel-Report für **alle** Serien ins Projekt (siehe unten).
 
-Einstellungen, Konzentrationen und Layouts werden neben der CSV in `<name>.uvvis.yaml` gespeichert
-und beim nächsten Öffnen wiederhergestellt. **Datei → Neu beginnen** verwirft all das für die aktuelle
-Datei und startet von vorn (die CSV selbst bleibt unverändert).
+## Projekte, Export, Rückgängig
 
-**Sprache:** Menü **Sprache** → Deutsch / English. Die Umstellung gilt sofort. Auf dem Mac steht das
-Menü in der Menüleiste oben am Bildschirm, nicht im Fenster. Die Achsenbeschriftungen der Abbildungen
-sind immer englisch.
+Alles passiert in einem **Projektordner**:
+
+1. **Datei → Neues Projekt…** – einen Ordner wählen oder im Dialog neu anlegen.
+2. Messdaten, Strukturen, Fotos und TD-DFT-Dateien von beliebigen Orten laden – sie werden **ins
+   Projekt kopiert** (`data/`, `images/`; ChemDraw-Exporte mit gleichem Namen wie eine CDXML kommen
+   mit). Dateien, die schon im Projekt liegen, werden nicht erneut kopiert.
+3. Normal arbeiten – das Projekt wird **automatisch gespeichert**. Beim Öffnen eines Projekts wird
+   jeweils eine Sicherung `project.uvvis.bak` angelegt.
+4. **Exportieren** schreibt direkt ins Projekt (vorhandene Dateien werden überschrieben):
+
+```
+MeinProjekt/
+  project.uvvis               Einstellungen (Pfade relativ zum Ordner)
+  data/  images/              Kopien aller Eingabedateien
+  exports/epsilon/<Serie>/    Abbildungen (PDF/SVG/PNG), <Serie>_results.csv, <Serie>_report.xlsx
+  exports/overlay/            <Projekt>_overlay.*
+  exports/fluorescence/       <Projekt>_fluorescence.*
+```
+
+Das Programm startet ohne Projekt. Projekte öffnen über **Datei → Projekt öffnen**, **Zuletzt
+geöffnet** oder indem man den Ordner ins Fenster zieht. **Datei → Projekt als Kopie speichern** legt
+eine vollständige Kopie an (z. B. als Zwischenstand). **Bearbeiten → Rückgängig / Wiederholen**
+(⌘Z / ⌘⇧Z, Strg+Z / Strg+Y) gilt für alle Tabs.
+
+## Excel-Report
+
+Für jede Serie enthält `<Serie>_report.xlsx`:
+
+- **Übersicht:** Parameter (Einheit, Molmasse, Schichtdicke, Cutoffs, Basislinienfenster und Offsets
+  je Probe), Ergebnisse aller Banden (Steigung, Achsenabschnitt, Standardfehler, R², ε ± SE,
+  **95 %-Konfidenzintervall** über die t-Verteilung) und die Methodik mit allen Formeln.
+- **Spektren:** A(λ) aller Proben, basislinienkorrigiert und roh, mit Diagramm.
+- **Ein Blatt pro Bande:** Messpunkte, Kennzeichen „im Fit“ (1/0, änderbar), die vollständige Regression
+  als **Excel-Formeln** (x̄, ȳ, Sxx, Sxy, m, b, RSS, s, SE, R², ε, t, KI) neben den Werten des Tools
+  samt Abweichung, Residuen und Diagramm (A/d gegen c mit Regressionsgerade).
+
+Blaue Zahlen sind Messwerte bzw. Tool-Ergebnisse, schwarze Zellen sind Formeln. Ändert man ein
+Kennzeichen in „im Fit“, rechnet Excel die Bande neu.
 
 ## Overlay-Tab
 
@@ -89,7 +122,12 @@ Mehrere Spektren in einer Abbildung vergleichen, gemessen und berechnet:
   skaliert (global oder pro Spektrum, z. B. wenn die berechnete Bande verschoben ist), oder
   **ε [10³ M⁻¹ cm⁻¹]** – gemessene Spektren brauchen dann Konzentration (bei mg/mL auch Molmasse)
   und Schichtdicke.
-- Farben und Namen in der Tabelle; die Legende lässt sich verschieben.
+- Pro Spektrum: Farbe, Name, **Linienart und -stärke**, **Skalierungsfaktor und vertikaler Versatz**
+  (z. B. für gestapelte Spektren); **Reihenfolge** mit ↑/↓ (auch die der Legende).
+- ORCA-Rechnungen mit **Spin-Bahn-Kopplung**: pro Rechnung „mit SOC“ oder „ohne SOC“ wählbar.
+- **Strichhöhe:** „stärkster Strich = Bandenmaximum“, „Höhe der Einzelbande“ oder
+  „Oszillatorstärke f“ auf eigener rechter Achse.
+- Struktur mit einstellbarer Größe; die Legende wird in freie Fläche gesetzt und lässt sich verschieben.
 
 ## Fluoreszenz-Tab
 
@@ -104,8 +142,6 @@ Absorption und Emission in einer Abbildung, wie in Publikationen üblich:
   kombiniert; beim UV-Foto ist die Freistellung standardmäßig aus (dunkler Hintergrund bleibt).
 - Struktur wie im ε-Tab.
 
-Overlay- und Fluoreszenz-Einstellungen bleiben zwischen den Sitzungen erhalten und lassen sich
-als Datei speichern und laden.
 
 ## Abbildungsgröße für Word
 
@@ -205,6 +241,11 @@ python build.py                        # App bauen -> dist/
 | `uvvis_images.py` | Bilder, HEIC, Freistellung (ISNet/ONNX, GrabCut), SVG/PDF-Einbettung |
 | `uvvis_chem.py` | CDXML: Zeichnung und Molmasse (RDKit) |
 | `uvvis_i18n.py` | Texte Deutsch/Englisch |
+| `uvvis_tabs.py` | Overlay- und Fluoreszenz-Tab |
+| `uvvis_extra.py` | TD-DFT einlesen/verbreitern, Fotopaar, Abbildung für die Zusatz-Tabs |
+| `uvvis_project.py` | Projektordner (Speichern/Laden, Kopieren der Eingabedateien) |
+| `uvvis_report.py` | Excel-Report (openpyxl) |
+| `parseuv_lite/` | Leser für Cary .DSW/.BSW/.FBSW (aus parseuv, BSD-3-Clause) |
 
 **Datenschutz:** Die `.gitignore` schließt CSV-, HEIC- und CDXML-Dateien aus, damit keine
 unveröffentlichten Messdaten im Repository landen.
@@ -217,7 +258,7 @@ Es gibt keine Gewährleistung.
 Die App enthält folgende Bibliotheken unter ihren eigenen Lizenzen:
 PySide6/Qt (LGPL-3.0), PyMuPDF (AGPL-3.0), RDKit (BSD-3-Clause), matplotlib (Matplotlib License),
 NumPy (BSD-3-Clause), Pillow (MIT-CMU), pillow-heif (BSD-3-Clause, enthält libheif, LGPL-3.0),
-OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT), olefile (BSD-2-Clause).
+OpenCV (Apache-2.0), ONNX Runtime (MIT), PyYAML (MIT), olefile (BSD-2-Clause), openpyxl (MIT).
 Der Leser für .DSW/.BSW-Dateien in `parseuv_lite/` stammt aus parseuv 1.0.4
 (© 2026 Ricardo J. Fernández-Terán, BSD-3-Clause, siehe `parseuv_lite/LICENSE`).
 Das ISNet-Modell für die Freistellung (Apache-2.0) wird beim ersten Gebrauch aus dem

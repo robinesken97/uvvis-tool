@@ -6,13 +6,14 @@ Selbsttest: python uvvis_gui.py --selftest AUSGABEORDNER [--selftest-isnet]
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -27,7 +28,9 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
 from matplotlib.figure import Figure as MplFigure  # noqa: E402
 from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal  # noqa: E402
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QImage, QPixmap  # noqa: E402
+from PySide6.QtCore import QUrl  # noqa: E402
+from PySide6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QIcon, QImage,  # noqa: E402
+                           QKeySequence, QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,  # noqa: E402
                                QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -39,6 +42,8 @@ import uvvis_core as core  # noqa: E402
 import uvvis_images as IMG  # noqa: E402
 from uvvis_i18n import T, get_lang, set_lang  # noqa: E402
 import uvvis_tabs  # noqa: E402
+import uvvis_project as PRJ  # noqa: E402
+import uvvis_report as REPORT  # noqa: E402
 
 PREVIEW_DPI = 90
 FIGSIZE = (8.0, 6.0)
@@ -112,7 +117,8 @@ DEFAULT_GLOB = {"path_length": 1.0, "cutoff": 1.0, "min_points": 3, "bands": "",
                 "size": "half_a4", "w_cm": 16.0, "h_cm": 11.0,
                 "fmt_pdf": True, "fmt_svg": True, "fmt_png": True,
                 "x_auto": True, "x_min": 200.0, "x_max": 1100.0,
-                "bands_add": True, "shoulders": False, "show_excl": False}
+                "bands_add": True, "shoulders": False, "show_excl": False, "inset": True,
+                "mark_sh": False}
 
 UNITS = [("mM", "mM"), ("uM", "µM"), ("mg/mL", "mg/mL"), ("M", "M")]
 
@@ -231,15 +237,20 @@ class MainWindow(QMainWindow):
         self._loading = False
         self.glob = dict(DEFAULT_GLOB)
         self.extra_cache = {}
-        self.ov_state = self._load_state("overlay_state")
-        self.fl_state = self._load_state("fluo_state")
+        self.ov_state, self.fl_state = {}, {}           # Programm startet immer leer
         self._tab_index = 0
+        self.project_dir = None
+        self._undo, self._redo = [], []
+        self._restoring = False
+        self._saved_snap = None
 
         self.fig = MplFigure(figsize=FIGSIZE, dpi=PREVIEW_DPI)
         self.canvas = FigureCanvasQTAgg(self.fig)
         self.canvas.setFixedSize(int(FIGSIZE[0] * PREVIEW_DPI), int(FIGSIZE[1] * PREVIEW_DPI))
         self.timer = QTimer(self, singleShot=True, interval=400)
         self.timer.timeout.connect(self.render)
+        self.autosave_timer = QTimer(self, singleShot=True, interval=800)
+        self.autosave_timer.timeout.connect(self.autosave)
 
         self.log_signal.connect(self._append_log)
         core.LOG = IMG.LOG = lambda m="": self.log_signal.emit(str(m))
@@ -248,6 +259,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon)))
         self.build_ui()
         self.setAcceptDrops(True)
+        QTimer.singleShot(0, self._init_undo)
         geo = self.settings.value("geometry")
         if geo:
             self.restoreGeometry(geo)
@@ -256,17 +268,34 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ UI
     def build_ui(self):
-        self.setWindowTitle(f"{T('app_title')} {APP_VERSION}")
+        self.update_title()
         mb = self.menuBar()
         mb.clear()
         m = mb.addMenu(T("menu_file"))
-        a = QAction(T("act_open"), self, shortcut="Ctrl+O", triggered=self.choose_csv)
-        m.addAction(a)
+        m.addAction(QAction(T("act_new_project"), self, shortcut=QKeySequence.New, triggered=self.new_project))
+        m.addAction(QAction(T("act_open_project"), self, shortcut=QKeySequence.Open,
+                            triggered=self.open_project_dialog))
+        self.recent_menu = m.addMenu(T("act_recent"))
+        self.fill_recent_menu()
+        m.addAction(QAction(T("act_save_project"), self, shortcut=QKeySequence.Save, triggered=self.save_project))
+        m.addAction(QAction(T("act_save_copy"), self, shortcut=QKeySequence("Ctrl+Shift+S"),
+                            triggered=self.save_project_copy))
+        m.addAction(QAction(T("act_show_folder"), self, triggered=self.show_project_folder))
+        m.addSeparator()
+        m.addAction(QAction(T("act_open"), self, shortcut=QKeySequence("Ctrl+Shift+O"), triggered=self.choose_csv))
         m.addAction(QAction(T("act_conc"), self, triggered=self.edit_concentrations))
         m.addAction(QAction(T("act_restart"), self, triggered=self.restart_file))
         m.addAction(QAction(T("act_export"), self, shortcut="Ctrl+E", triggered=self.export_current))
         m.addSeparator()
-        m.addAction(QAction(T("act_quit"), self, shortcut="Ctrl+Q", triggered=self.close))
+        m.addAction(QAction(T("act_quit"), self, shortcut=QKeySequence.Quit, triggered=self.close))
+        me = mb.addMenu(T("menu_edit"))
+        self.act_undo = QAction(T("act_undo"), self, triggered=self.undo)
+        self.act_undo.setShortcuts([QKeySequence.Undo])
+        self.act_redo = QAction(T("act_redo"), self, triggered=self.redo)
+        self.act_redo.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Shift+Z")])
+        me.addAction(self.act_undo)
+        me.addAction(self.act_redo)
+        self._update_undo_actions()
         ml = mb.addMenu(T("menu_lang"))
         grp = QActionGroup(self)
         for code, name in (("de", "Deutsch"), ("en", "English")):
@@ -398,8 +427,12 @@ class MainWindow(QMainWindow):
             self.cmb_r2.addItem(T({"legend": "r2_legend", "label": "r2_label", "off": "r2_off"}[key]), key)
         f.addRow(T("r2_mode"), self.cmb_r2)
         self.cb_err = QCheckBox(T("show_err"))
+        self.cb_marksh = QCheckBox(T("mark_sh"))
+        self.cb_inset = QCheckBox(T("inset_show"))
         self.cb_tab = QCheckBox(T("inset_table"))
         f.addRow(self.cb_err)
+        f.addRow(self.cb_marksh)
+        f.addRow(self.cb_inset)
         f.addRow(self.cb_tab)
         self.cb_excl = QCheckBox(T("show_excl"))
         f.addRow(self.cb_excl)
@@ -497,7 +530,8 @@ class MainWindow(QMainWindow):
         self.ed_bands.editingFinished.connect(self.changed)
         for w in (self.cmb_bl, self.cmb_r2):
             w.currentIndexChanged.connect(self.changed)
-        for w in (self.cb_err, self.cb_tab, self.cb_bands_add, self.cb_shoulders, self.cb_excl):
+        for w in (self.cb_err, self.cb_tab, self.cb_bands_add, self.cb_shoulders, self.cb_excl, self.cb_inset,
+                  self.cb_marksh):
             w.toggled.connect(self.changed)
 
     def apply_globals(self):
@@ -524,6 +558,9 @@ class MainWindow(QMainWindow):
         self.cb_bands_add.setChecked(gl.get("bands_add", True))
         self.cb_shoulders.setChecked(gl.get("shoulders", False))
         self.cb_excl.setChecked(gl.get("show_excl", False))
+        self.cb_inset.setChecked(gl.get("inset", True))
+        self.cb_marksh.setChecked(gl.get("mark_sh", False))
+        self.cb_tab.setEnabled(gl.get("inset", True))
         self.sp_xmin.setValue(gl["x_min"])
         self.sp_xmax.setValue(gl["x_max"])
         self.sp_xmin.setEnabled(not gl["x_auto"])
@@ -545,7 +582,8 @@ class MainWindow(QMainWindow):
                          fmt_pdf=self.cb_pdf.isChecked(), fmt_svg=self.cb_svg.isChecked(),
                          fmt_png=self.cb_png.isChecked(), x_auto=self.cb_xauto.isChecked(),
                          bands_add=self.cb_bands_add.isChecked(), shoulders=self.cb_shoulders.isChecked(),
-                         show_excl=self.cb_excl.isChecked(),
+                         show_excl=self.cb_excl.isChecked(), inset=self.cb_inset.isChecked(),
+                         mark_sh=self.cb_marksh.isChecked(),
                          x_min=self.sp_xmin.value(), x_max=self.sp_xmax.value())
 
     def _update_size_widgets(self):
@@ -621,6 +659,8 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ Daten
     def choose_csv(self):
+        if not self.ensure_project():
+            return
         start = self.settings.value("last_dir", str(Path.home()))
         ps, _ = QFileDialog.getOpenFileNames(self, T("dlg_open_csv"), start,
                                              f"{T('flt_csv')};;{T('flt_all')}")
@@ -640,7 +680,13 @@ class MainWindow(QMainWindow):
     def open_files(self, paths, ask=True):
         """Eine oder mehrere Messdateien (CSV/TXT/DSW/BSW) gemeinsam öffnen,
         z. B. wenn jede Konzentration einzeln gemessen wurde."""
-        paths = sorted(str(Path(p).resolve()) for p in paths)
+        if not self.ensure_project():
+            return False
+        try:
+            paths = sorted(self.import_file(p, "data") for p in paths)   # Kopie ins Projekt
+        except OSError as e:
+            self.error(str(e))
+            return False
         path = paths[0]
         try:
             samples = core.read_samples(paths)
@@ -650,12 +696,9 @@ class MainWindow(QMainWindow):
         if not samples:
             self.error(T("conc_none"))
             return False
-        self.save_project()
         self.csv_path, self.csv_paths, self.samples = path, paths, samples
         self.settings.setValue("last_dir", str(Path(path).parent))
         self.groups, self.units, self.series, self.conc = {}, {}, {}, {}
-        data = self.read_project()
-        self.conc = (data.get("concentrations") or {}) if data else {}
         _, _, missing = core.group_samples(samples, self.conc, Path(path).stem)
         if missing and ask and not self.edit_concentrations(rebuild=False):
             pass
@@ -663,7 +706,6 @@ class MainWindow(QMainWindow):
             self.lbl_file.setText(self.files_label())
             self.error(T("conc_none"))
             return False
-        self.load_project(data)
         self.lbl_file.setText(self.files_label())
         self.apply_globals()
         self.apply_series_widgets()
@@ -682,7 +724,6 @@ class MainWindow(QMainWindow):
             self.rebuild_groups()
             self.apply_series_widgets()
             self.render()
-            self.save_project()
         return True
 
     def rebuild_groups(self):
@@ -714,74 +755,304 @@ class MainWindow(QMainWindow):
         return bool(groups)
 
     def restart_file(self):
-        """Alle gespeicherten Eingaben zur aktuellen CSV verwerfen und frisch beginnen."""
+        """Eingaben zu den aktuellen Messdateien verwerfen (Konzentrationen, Serien-Einstellungen)."""
         if not self.csv_path:
             return self.error(T("load_first"))
         if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
             ans = QMessageBox.question(self, T("act_restart").rstrip("…"),
-                                       T("restart_q", name=Path(self.csv_path).name))
+                                       T("restart_q", name=self.files_label()))
             if ans != QMessageBox.Yes:
                 return False
-        pf = self.project_file()
         paths = list(self.csv_paths)
-        self.csv_path = None                      # verhindert, dass open_csv vorher noch speichert
-        try:
-            if pf and pf.exists():
-                pf.unlink()
-        except OSError as e:
-            self.error(str(e))
         self.glob = dict(DEFAULT_GLOB)
         self.series, self.conc, self.current = {}, {}, None
         return self.open_files(paths)
 
-    def project_file(self):
-        if not self.csv_path:
-            return None
-        n = len(getattr(self, "csv_paths", [])) or 1
-        p = Path(self.csv_path)
-        return p.with_name(f"{p.stem}+{n - 1}.uvvis.yaml") if n > 1 else p.with_suffix(".uvvis.yaml")
+    # ------------------------------------------------------------ Projekt
+    def get_state(self):
+        """Gesamter Zustand aller Tabs (serialisierbar) – für Projektdatei und Undo."""
+        if hasattr(self, "sp_d"):
+            self.collect_globals()
+        keys = ("mw", "structure", "photo", "bg", "layout", "struct_w", "photo_w", "band_cutoff", "band_hidden")
+        return {"eps": {"files": list(self.csv_paths), "glob": dict(self.glob), "conc": self.conc,
+                        "series": {g: {k: st.get(k) for k in keys} for g, st in self.series.items()},
+                        "current": self.current},
+                "overlay": self.ov_state, "fluo": self.fl_state, "tab": self._tab_index}
+
+    def set_state(self, state):
+        """Zustand übernehmen (Projekt laden, Undo/Redo)."""
+        state = json.loads(json.dumps(state))          # entkoppeln
+        eps = state.get("eps") or {}
+        old_series = self.series
+        self.glob = dict(DEFAULT_GLOB, **(eps.get("glob") or {}))
+        self.conc = eps.get("conc") or {}
+        self.csv_paths = [p for p in eps.get("files") or [] if Path(p).exists()]
+        self.csv_path = self.csv_paths[0] if self.csv_paths else None
+        self.groups, self.units, self.series, self.samples = {}, {}, {}, []
+        self.ov_state.clear()
+        self.ov_state.update(state.get("overlay") or {})
+        self.fl_state.clear()
+        self.fl_state.update(state.get("fluo") or {})
+        self._tab_index = state.get("tab", 0) or 0
+        self.current = eps.get("current")
+        self.build_ui()
+        if self.csv_paths:
+            key = ("samples_multi", tuple(self.csv_paths))
+            if key not in self.extra_cache:
+                self.extra_cache[key] = core.read_samples(self.csv_paths)
+            self.samples = self.extra_cache[key]
+            self.rebuild_groups()
+            for g, sd in (eps.get("series") or {}).items():
+                if g not in self.series:
+                    continue
+                st = self.series[g]
+                for k, v in sd.items():
+                    if v is not None and k not in ("structure", "photo"):
+                        st[k] = v
+                st["layout"] = st.get("layout") or {}
+                old = old_series.get(g) or {}
+                for kind, setter in (("structure", self.set_structure), ("photo", self.set_photo)):
+                    p = sd.get(kind)
+                    if p and Path(p).exists():
+                        if old.get(kind) == p and old.get(kind + "_asset") is not None:
+                            st[kind], st[kind + "_asset"] = p, old[kind + "_asset"]   # wiederverwenden
+                            if kind == "structure":
+                                st["chem_info"], st["chem_warn"] = old.get("chem_info", ""), old.get("chem_warn")
+                        elif kind == "structure":
+                            setter(p, g, render=False, sync=True, autofill_mw=False)
+                        else:
+                            setter(p, g, render=False, sync=True)
+            if self.current not in self.groups:
+                self.current = next(iter(self.groups), None)
+            self.cmb_series.blockSignals(True)
+            self.cmb_series.setCurrentText(self.current or "")
+            self.cmb_series.blockSignals(False)
+            self.lbl_file.setText(self.files_label())
+        self.apply_globals()
+        self.apply_series_widgets()
+        if self.csv_paths:
+            self.render()
+        else:
+            self.fig.clear()
+            self.canvas.draw_idle()
+
+    def _snap(self):
+        return json.dumps(self.get_state(), sort_keys=True, default=str)
+
+    def _init_undo(self):
+        self._undo, self._redo = [self._snap()], []
+        self._saved_snap = self._undo[0]
+        self._update_undo_actions()
+        self.update_title()
+
+    def push_undo(self):
+        if self._restoring or not self._undo:
+            return
+        snap = self._snap()
+        if snap != self._undo[-1]:
+            self._undo.append(snap)
+            del self._undo[:-200]
+            self._redo.clear()
+            self._update_undo_actions()
+            self.update_title()
+            if self.project_dir:
+                self.autosave_timer.start()
+
+    def _restore(self, snap):
+        self._restoring = True
+        self.set_state(json.loads(snap))
+        QTimer.singleShot(200, self._end_restore)       # erst nach dem Neuzeichnen aller Tabs
+
+    def _end_restore(self):
+        self._restoring = False
+        if self._undo:
+            self._undo[-1] = self._snap()              # tatsächlichen Zustand übernehmen
+        self._update_undo_actions()
+        self.update_title()
+        if self.project_dir:
+            self.autosave_timer.start()                # Undo/Redo-Stand ebenfalls speichern
+
+    def _load_state_into_ui(self, state):
+        """Projekt/neues Projekt: Zustand setzen, Undo-Verlauf nach dem Neuzeichnen neu beginnen."""
+        self._restoring = True
+        self.set_state(state)
+        QTimer.singleShot(200, self._after_load)
+
+    def _after_load(self):
+        self._restoring = False
+        self._init_undo()
+
+    def undo(self):
+        if len(self._undo) > 1:
+            self._redo.append(self._undo.pop())
+            self._restore(self._undo[-1])
+
+    def redo(self):
+        if self._redo:
+            self._undo.append(self._redo.pop())
+            self._restore(self._undo[-1])
+
+    def _update_undo_actions(self):
+        if hasattr(self, "act_undo"):
+            self.act_undo.setEnabled(len(self._undo) > 1)
+            self.act_redo.setEnabled(bool(self._redo))
+
+    def is_dirty(self):
+        if self._restoring:
+            return False
+        return bool(self._undo) and self._undo[-1] != self._saved_snap
+
+    def update_title(self):
+        name = Path(self.project_dir).name if self.project_dir else T("no_project_title")
+        self.setWindowTitle(f"{name} – {T('app_title')} {APP_VERSION}")
+
+    # -- Projektordner zuerst: Dateien werden beim Laden kopiert, Änderungen automatisch gespeichert
+    def ensure_project(self):
+        if self.project_dir:
+            return True
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return False
+        if QMessageBox.question(self, T("app_title"), T("need_project_q")) != QMessageBox.Yes:
+            return False
+        return self.choose_project_folder()
+
+    def choose_project_folder(self):
+        d = QFileDialog.getExistingDirectory(self, T("choose_project_dir"),
+                                             self.settings.value("last_project_dir", str(Path.home())))
+        if not d:
+            return False
+        if PRJ.is_project(d):
+            return self.open_project(d, ask=False)
+        return self.create_project(d)
+
+    def create_project(self, d):
+        try:
+            pdir = PRJ.create(d)
+        except OSError as e:
+            self.error(str(e))
+            return False
+        self.project_dir = str(pdir)
+        self.settings.setValue("last_project_dir", str(pdir.parent))
+        self._load_state_into_ui({})
+        self.add_recent(pdir)
+        self.log_signal.emit(T("project_created", p=pdir))
+        return True
+
+    def import_file(self, path, sub):
+        if not self.project_dir:
+            return str(Path(path).resolve())
+        new = PRJ.import_file(self.project_dir, path, sub)
+        if Path(new) != Path(path).resolve():
+            self.log_signal.emit("  " + T("file_imported", src=Path(path).name, dst=Path(new).relative_to(
+                self.project_dir).as_posix()))
+        return new
+
+    def maybe_save(self):
+        """Vor Neu/Öffnen/Schließen: ausstehendes automatisches Speichern sofort ausführen."""
+        if self.autosave_timer.isActive():
+            self.autosave_timer.stop()
+            self.autosave()
+        return True
+
+    def autosave(self):
+        if not self.project_dir or self._restoring:
+            return
+        try:
+            PRJ.write(self.project_dir, self.get_state())
+            self._saved_snap = self._undo[-1] if self._undo else None
+            self.statusBar().showMessage(T("autosaved"), 2000)
+        except Exception as e:
+            self.log_signal.emit(f"{T('err_title')}: {e}")
+
+    def new_project(self):
+        self.maybe_save()
+        self.choose_project_folder()
+
+    def open_project_dialog(self):
+        self.maybe_save()
+        d = QFileDialog.getExistingDirectory(self, T("act_open_project"),
+                                             self.settings.value("last_project_dir", str(Path.home())))
+        if not d:
+            return
+        if PRJ.is_project(d):
+            self.open_project(d, ask=False)
+        elif QMessageBox.question(self, T("app_title"), T("make_project_q", p=d)) == QMessageBox.Yes:
+            self.create_project(d)
+
+    def open_project(self, path, ask=True):
+        pdir = PRJ.is_project(path)
+        if pdir is None:
+            self.error(T("no_project", p=path))
+            return False
+        self.maybe_save()
+        try:
+            PRJ.backup(pdir)                           # Sicherung: project.uvvis.bak
+            state = PRJ.load(pdir)
+        except Exception as e:
+            self.error(f"{type(e).__name__}: {e}")
+            return False
+        for m in PRJ.missing_files(state):
+            self.log_signal.emit("  " + T("missing_file", p=m))
+        self.project_dir = str(pdir)
+        self._load_state_into_ui(state)
+        self.add_recent(pdir)
+        self.settings.setValue("last_project_dir", str(pdir.parent))
+        return True
 
     def save_project(self):
-        pf = self.project_file()
-        if not pf:
-            return
-        self.collect_globals()
-        data = {"global": self.glob,
-                "concentrations": self.conc,
-                "series": {g: {k: st.get(k) for k in ("mw", "structure", "photo", "bg", "layout",
-                                                       "struct_w", "photo_w", "band_cutoff",
-                                                       "band_hidden")}
-                           for g, st in self.series.items()}}
-        try:
-            pf.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
-        except OSError:
-            pass
+        if not self.project_dir:
+            return self.ensure_project()
+        self.autosave_timer.stop()
+        self.autosave()
+        return True
 
-    def read_project(self):
-        pf = self.project_file()
-        if not pf or not pf.exists():
-            return {}
+    def save_project_copy(self):
+        """Projekt (inkl. aller Dateien) als Kopie in einen neuen Ordner schreiben, z. B. als Zwischenstand."""
+        if not self.project_dir:
+            return self.error(T("load_first"))
+        d = QFileDialog.getExistingDirectory(self, T("act_save_copy"), str(Path(self.project_dir).parent))
+        if d:
+            return self._write_project(Path(d), switch=False)
+        return False
+
+    def _write_project(self, pdir: Path, switch=True):
         try:
-            return yaml.safe_load(pf.read_text(encoding="utf-8")) or {}
+            abs_state = PRJ.save(pdir, self.get_state())
+        except Exception as e:
+            self.error(f"{type(e).__name__}: {e}")
+            return False
+        if switch:
+            self.project_dir = str(pdir)
+            self._load_state_into_ui(abs_state)
+            self.add_recent(pdir)
+        self.log_signal.emit(T("project_saved", p=pdir))
+        return True
+
+    def show_project_folder(self):
+        if self.project_dir:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self.project_dir))
+
+    def add_recent(self, pdir):
+        rec = [str(pdir)] + [r for r in self.recent() if r != str(pdir)]
+        self.settings.setValue("recent_projects", json.dumps(rec[:10]))
+        self.fill_recent_menu()
+
+    def recent(self):
+        try:
+            return [r for r in json.loads(self.settings.value("recent_projects", "[]") or "[]")]
         except Exception:
-            return {}
+            return []
 
-    def load_project(self, data=None):
-        data = data if data is not None else self.read_project()
-        if not data:
+    def fill_recent_menu(self):
+        if not hasattr(self, "recent_menu"):
             return
-        self.glob.update(data.get("global") or {})
-        for g, sd in (data.get("series") or {}).items():
-            if g not in self.series:
-                continue
-            st = self.series[g]
-            st.update({k: sd.get(k) or st.get(k) for k in ("mw", "bg", "layout", "struct_w", "photo_w",
-                                                           "band_cutoff", "band_hidden")})
-            st["layout"] = st["layout"] or {}
-            if sd.get("structure") and Path(sd["structure"]).exists():
-                self.set_structure(sd["structure"], g, render=False, sync=True, autofill_mw=False)
-            if sd.get("photo") and Path(sd["photo"]).exists():
-                self.set_photo(sd["photo"], g, render=False, sync=True)
+        self.recent_menu.clear()
+        rec = [r for r in self.recent() if PRJ.is_project(r)]
+        for r in rec:
+            act = QAction(f"{Path(r).name}  –  {Path(r).parent}", self)
+            act.triggered.connect(lambda _=False, r=r: self.open_project(r))
+            self.recent_menu.addAction(act)
+        self.recent_menu.setEnabled(bool(rec))
 
     def series_changed(self, g):
         if not g or g not in self.series:
@@ -797,6 +1068,7 @@ class MainWindow(QMainWindow):
         manual = self.glob["baseline"] == "manual"
         self.sp_bla.setEnabled(manual)
         self.sp_blb.setEnabled(manual)
+        self.cb_tab.setEnabled(self.glob.get("inset", True))
         self.timer.start()
 
     def mw_edited(self):
@@ -823,6 +1095,8 @@ class MainWindow(QMainWindow):
     def set_structure(self, path, g=None, render=True, sync=False, autofill_mw=True):
         g = g or self.current
         st = self.series[g]
+        if path is not None and self.project_dir:
+            path = self.import_file(path, "images")
         if path is None:
             st.update(structure=None, structure_asset=None, chem_info="", chem_warn=False)
             self.apply_series_widgets()
@@ -909,6 +1183,8 @@ class MainWindow(QMainWindow):
     def set_photo(self, path, g=None, render=True, sync=False):
         g = g or self.current
         st = self.series[g]
+        if path is not None and self.project_dir:
+            path = self.import_file(path, "images")
         if path is None:
             st.update(photo=None, photo_asset=None)
             self.apply_series_widgets()
@@ -968,6 +1244,8 @@ class MainWindow(QMainWindow):
         cfg["bands_add_auto"] = gl.get("bands_add", True)
         cfg["find_shoulders"] = gl.get("shoulders", False)
         cfg["inset"]["show_excluded"] = gl.get("show_excl", False)
+        cfg["inset"]["show"] = gl.get("inset", True)
+        cfg["labels"]["mark_shoulders"] = gl.get("mark_sh", False)
         cfg["band_cutoff"] = {int(k): float(v) for k, v in (st.get("band_cutoff") or {}).items()}
         cfg["band_hidden"] = [int(k) for k in (st.get("band_hidden") or [])]
         if gl["baseline"] == "off":
@@ -1022,6 +1300,7 @@ class MainWindow(QMainWindow):
             self.canvas.draw_idle()
             self.fill_table(results, cfg2)
             self._last = (cfg2, results)
+            self.push_undo()
         except Exception as e:
             self.log_signal.emit(traceback.format_exc())
             self.statusBar().showMessage(f"{T('err_title')}: {e}", 8000)
@@ -1044,6 +1323,7 @@ class MainWindow(QMainWindow):
         if layout != stored:
             self.series[self.current]["layout"][self.size_key()] = layout
         self.sync_image_sizes(layout)
+        self.push_undo()
 
     def sync_image_sizes(self, layout):
         """Größenfelder an die tatsächliche Bildgröße anpassen (Mausrad, automatisches Verkleinern)."""
@@ -1150,32 +1430,43 @@ class MainWindow(QMainWindow):
     def export_dialog(self):
         if not self.csv_path:
             return self.error(T("load_first"))
-        start = self.settings.value("last_export_dir", str(Path(self.csv_path).parent))
-        d = QFileDialog.getExistingDirectory(self, T("dlg_export"), start)
-        if d:
-            self.settings.setValue("last_export_dir", d)
-            out = self.export_all(Path(d))
-            QMessageBox.information(self, T("btn_export"), T("exported_to", p="\n".join(map(str, out))))
+        if not self.ensure_project():
+            return
+        out = self.export_all()
+        folders = sorted({str(p.parent) for p in out})
+        self.info(T("exported_to", p="\n".join(folders)))
 
-    def export_all(self, folder: Path):
-        """Alle Serien mit ihren Einstellungen/Layouts exportieren (PDF, PNG, CSV)."""
+    def export_all(self, folder: Path = None):
+        """Alle Serien exportieren: Abbildungen, Ergebnis-CSV und Excel-Report.
+        Ohne Ordnerangabe nach <Projekt>/exports/epsilon/<Serie>/ (wird überschrieben)."""
         self.collect_globals()
         stem = Path(self.csv_path).stem
         written = []
         for g in self.groups:
+            if folder is None:
+                gdir = PRJ.export_dir(self.project_dir, "epsilon", core.safe_name(g))
+                name = core.safe_name(g)
+            else:
+                gdir = Path(folder)
+                name = f"{stem}_{g}" if len(self.groups) > 1 else stem
             cfg = self.make_cfg(g)
             core.setup_fonts(plt, cfg)
             cfg2, spectra, results = core.prepare_series(cfg, self.groups[g], g)
-            name = f"{stem}_{g}" if len(self.groups) > 1 else stem
-            cfg2["output"] = str(folder / f"{name}.{cfg2['_main_fmt']}")
+            folder_g = gdir
+            cfg2["output"] = str(folder_g / f"{name}.{cfg2['_main_fmt']}")
             fig = MplFigure(figsize=cfg2["figsize_in"], dpi=PREVIEW_DPI)
             FigureCanvasAgg(fig)
             F = core.build_figure(plt, cfg2, spectra, results, self.get_layout(g), fig=fig)
             F.export()
-            core.write_results(results, folder / f"{name}_results.csv", cfg2)
-            written += [folder / f"{name}.{e}" for e in [cfg2["_main_fmt"]] + cfg2["extra_formats"]]
-            written.append(folder / f"{name}_results.csv")
-        self.save_project()
+            core.write_results(results, folder_g / f"{name}_results.csv", cfg2)
+            written += [folder_g / f"{name}.{e}" for e in [cfg2["_main_fmt"]] + cfg2["extra_formats"]]
+            written.append(folder_g / f"{name}_results.csv")
+            try:
+                rep = REPORT.write_report(folder_g / f"{name}_report.xlsx", cfg2, self.groups[g], spectra,
+                                          results, g, files=self.csv_paths, version=APP_VERSION)
+                written.append(Path(rep))
+            except PermissionError:
+                self.error(T("report_locked", p=folder_g / f"{name}_report.xlsx"))
         return written
 
     # ------------------------------------------------------------ Drag & Drop
@@ -1185,6 +1476,10 @@ class MainWindow(QMainWindow):
 
     def dropEvent(self, ev):
         files = [u.toLocalFile() for u in ev.mimeData().urls()]
+        for p in files:
+            if PRJ.is_project(p):
+                self.open_project(p)
+                return
         data = [p for p in files if Path(p).suffix.lower() in {".csv", ".txt"} | core.BINARY_EXT]
         if data:
             self.open_files(data)                     # mehrere Messdateien = ein Datensatz
@@ -1205,12 +1500,6 @@ class MainWindow(QMainWindow):
         if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
             QMessageBox.critical(self, T("err_title"), str(msg))
 
-    def _load_state(self, key):
-        try:
-            return yaml.safe_load(self.settings.value(key, "") or "") or {}
-        except Exception:
-            return {}
-
     def rebuild_tabs(self):
         self.build_ui()
         self.render()
@@ -1229,9 +1518,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, T("app_title"), msg)
 
     def closeEvent(self, ev):
-        for key, st in (("overlay_state", self.ov_state), ("fluo_state", self.fl_state)):
-            self.settings.setValue(key, yaml.safe_dump(st, allow_unicode=True))
-        self.save_project()
+        if not self.maybe_save():
+            ev.ignore()
+            return
         self.settings.setValue("geometry", self.saveGeometry())
         super().closeEvent(ev)
 
@@ -1296,8 +1585,13 @@ def selftest(outdir, with_isnet=False):
         report.append(f"photo format: {photo.suffix}")
         w = MainWindow()
         w._allow_download = with_isnet
+        proj = out / "projekt_test"
+        assert not w.open_csv(csv), "ohne Projekt darf nichts geladen werden"
+        assert w.create_project(proj)
+        QApplication.processEvents()
         w.open_csv(csv)
         assert set(w.groups) == {"TEST-A", "TEST-B"}, w.groups
+        assert Path(w.csv_path).parent == proj / "data", w.csv_path          # ins Projekt kopiert
         w.set_structure(str(cdxml), "TEST-A", render=False, sync=True)
         st = w.series["TEST-A"]
         report.append(f"CDXML: {st['chem_info']!r}")
@@ -1331,8 +1625,6 @@ def selftest(outdir, with_isnet=False):
         assert w.rebuild_groups() and "unbenannt" in w.groups, w.groups
         assert len(w.groups["unbenannt"]) == 5
         w.render()
-        w.save_project()
-        assert w.open_csv(plain, ask=False) and "unbenannt" in w.groups   # aus Projekt geladen
         report.append("unnamed samples: OK")
         # Einzelmessungen in getrennten Dateien + Cary-Binärdatei (.DSW)
         import struct
@@ -1409,6 +1701,79 @@ def selftest(outdir, with_isnet=False):
         lams = {int(round(r["lam_requested"])): r for r in res_t}
         assert 600 in lams and lams[600].get("hidden") and lams[484]["cutoff"] == 2.0, sorted(lams)
         report.append("bands/shoulders/cutoff: OK")
+
+        def pump(sec=0.4):
+            import time
+            t0 = time.time()
+            while time.time() - t0 < sec:
+                QApplication.processEvents()
+                time.sleep(0.02)
+
+        # TD-DFT mit Spin-Bahn-Kopplung (ORCA 6): Zustandsnamen wie "0-1.0A" dürfen nicht als Zahl gelten
+        soc = out / "input" / "orca_soc.out"
+        hdr = ["-" * 104, "      SOC CORRECTED ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE MOMENTS", "-" * 104,
+               "      Transition         Energy     Energy  Wavelength fosc(D2)      D2       |DX|      |DY|      |DZ|",
+               "                          (eV)      (cm-1)    (nm)                 (au**2)    (au)      (au)      (au)",
+               "-" * 104,
+               "  0-1.0A  ->  1-3.0A    2.898266   23376.1   427.8   0.000000000   0.00000   0.00001   0.00000   0.00000",
+               "  0-1.0A  -> 10-1.0A    4.004892   32301.6   309.6   0.120701528   1.23017   0.69013   0.85513   0.15048",
+               ""]
+        soc.write_text("\n".join(orca.read_text(encoding="utf-8").splitlines() + hdr), encoding="utf-8")
+        import uvvis_extra as XX
+        r_soc = XX.parse_tddft(soc)
+        assert r_soc["variant"] == "soc" and abs(r_soc["E"][1] - 4.004892) < 1e-6 and abs(r_soc["f"][1] - 0.1207) < 1e-3, r_soc
+        assert XX.parse_tddft(soc, "nosoc")["variant"] == "nosoc"
+        report.append("TD-DFT SOC: OK")
+
+        # Overlay-Optionen: Skalierung, Versatz, Linienart, Strich-Modi
+        w.ov_state["entries"][1].update(scale=0.8, offset=0.2, ls="dotted", lw=2.0)
+        for mode in ("max", "band", "faxis"):
+            w.ov_state.update(mode="norm", stick_mode=mode, sticks=True)
+            files = w.ov_tab.export_to(out / f"overlay_sticks_{mode}")
+            assert all(f.exists() for f in files), files
+        report.append("overlay options: OK")
+
+        # Export ins Projekt inkl. Excel-Report
+        w.open_csv(csv, ask=False)
+        w.series["TEST-A"]["mw"] = 95.1
+        w.set_structure(str(cdxml), "TEST-A", render=False, sync=True, autofill_mw=False)
+        w.render()
+        pump()
+        files = w.export_all()
+        rep = proj / "exports" / "epsilon" / "TEST-A" / "TEST-A_report.xlsx"
+        assert rep in files and rep.exists(), files
+        from openpyxl import load_workbook
+        wbk = load_workbook(rep)
+        assert len(wbk.sheetnames) >= 3 and any("nm" in n for n in wbk.sheetnames), wbk.sheetnames
+        report.append("export into project + Excel report: OK")
+
+        # Projekt automatisch gespeichert -> in neuem Fenster öffnen (Dateien als Kopie, Pfade relativ)
+        w.ov_state["entries"][0]["file"] = w.import_file(w.ov_state["entries"][0]["file"], "data")
+        w.push_undo()
+        pump(1.5)                                      # automatisches Speichern abwarten
+        w.maybe_save()
+        txt = (proj / PRJ.PROJECT_FILE).read_text(encoding="utf-8")
+        assert str(out / "input") not in txt.replace(str(proj), ""), "absolute Pfade im Projekt"
+        assert (proj / "data" / csv.name).exists() and (proj / "images" / cdxml.name).exists()
+        w2 = MainWindow()
+        assert w2.open_project(proj, ask=False)
+        pump()
+        assert set(w2.groups) == {"TEST-A", "TEST-B"} and w2.series["TEST-A"]["mw"] == 95.1, w2.groups
+        assert len(w2.ov_state.get("entries", [])) == 2 and w2.fl_state.get("em_file"), "Tabs nicht geladen"
+        report.append("project save/load: OK")
+
+        # Undo/Redo
+        before = w2.glob["cutoff"]
+        w2.sp_cut.setValue(before + 0.5)
+        pump(0.8)
+        assert w2.glob["cutoff"] == before + 0.5
+        w2.undo()
+        pump()
+        assert abs(w2.glob["cutoff"] - before) < 1e-9, w2.glob["cutoff"]
+        w2.redo()
+        pump()
+        assert abs(w2.glob["cutoff"] - (before + 0.5)) < 1e-9, w2.glob["cutoff"]
+        report.append("undo/redo: OK")
         for lang in ("en", "de"):
             w.switch_lang(lang)
         report.append("OK")

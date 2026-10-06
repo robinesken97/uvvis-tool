@@ -2,6 +2,36 @@
 
 # Änderungen
 
+## 1.2.0 – 06.10.2026
+
+### Neu
+- **Projektordner:** zuerst Ordner wählen oder anlegen; jede geladene Datei wird hineinkopiert, das
+  Projekt wird automatisch gespeichert (Sicherung `project.uvvis.bak` beim Öffnen), und Exporte landen
+  direkt in `exports/epsilon/<Serie>/`, `exports/overlay/`, `exports/fluorescence/`. Datei → Neu /
+  Öffnen / Zuletzt geöffnet / Projekt als Kopie speichern / Projektordner anzeigen. Das Programm
+  startet ohne Projekt.
+- **Excel-Report** pro Serie: Parameter, alle Ergebnisse inkl. 95 %-Konfidenzintervall, Methodik mit
+  Formeln, Spektren und je Bande ein Blatt mit der vollständigen Regression als Excel-Formeln neben
+  den Tool-Werten, Residuen und nativen Diagrammen.
+- **Rückgängig / Wiederholen** (⌘Z / ⌘⇧Z, Strg+Z / Strg+Y) über alle Tabs.
+- **Overlay:** Linienart und -stärke, Skalierungsfaktor und vertikaler Versatz pro Spektrum,
+  Reihenfolge (↑/↓), Strukturgröße in %, Legende in freier Fläche.
+- **TD-DFT-Striche:** „stärkster Strich = Bandenmaximum“ (neuer Standard), „Höhe der Einzelbande“
+  oder Oszillatorstärke f auf eigener rechter Achse.
+- ORCA-Spektren mit **Spin-Bahn-Kopplung**; „mit SOC“ / „ohne SOC“ pro Rechnung wählbar.
+- ε-Tab: Regressions-Inset abschaltbar (zusätzlich zu seiner Tabelle).
+- Fluoreszenz-Tab: Größenfelder für Struktur und Fotos.
+- Kennzeichnung „(sh)“ an Schultern in der Abbildung ist optional (standardmäßig aus); Tabelle und Excel-Report behalten sie.
+
+### Geändert
+- Die Ergebnis-CSV hat eine zusätzliche Spalte `ci95` (95 %-Konfidenzintervall von ε).
+- Einstellungen werden nicht mehr als `.uvvis.yaml` neben den Messdateien gespeichert, und Overlay-/
+  Fluoreszenz-Tab werden beim Start nicht mehr automatisch wiederhergestellt – dafür gibt es Projektordner.
+
+### Korrigiert
+- ORCA-Ausgaben mit Spin-Bahn-Kopplung wurden falsch gelesen (Zustandsnamen wie „0-1.0A“ wurden als
+  Zahlen interpretiert, mit falschen Energien und Oszillatorstärken). Solche Rechnungen bitte neu laden.
+
 ## 1.1.0 – 05.10.2026
 
 **Bitte prüfen:** Konzentrationen, die mit 1.0.0 über den Konzentrationsdialog eingegeben wurden,

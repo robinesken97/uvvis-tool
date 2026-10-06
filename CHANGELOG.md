@@ -2,6 +2,35 @@
 
 # Changelog
 
+## 1.2.0 – 2026-10-06
+
+### Added
+- **Project folders:** choose or create a folder first; every loaded file is copied into it, the project
+  is saved automatically (backup `project.uvvis.bak` on opening), and exports go directly to
+  `exports/epsilon/<series>/`, `exports/overlay/`, `exports/fluorescence/`. File → New / Open / Recent
+  projects / Save project copy / Show project folder. The program starts without a project.
+- **Excel report** per series: parameters, all results incl. 95 % confidence interval, method with
+  equations, spectra, and one sheet per band with the full regression as Excel formulas next to the
+  tool's values, residuals and native charts.
+- **Undo / Redo** (⌘Z / ⌘⇧Z, Ctrl+Z / Ctrl+Y) across all tabs.
+- **Overlay:** line style and width, scale factor and vertical offset per spectrum, order (↑/↓),
+  structure size in %, legend placed in free space.
+- **TD-DFT sticks:** "strongest stick = band maximum" (new default), "height of individual band",
+  or oscillator strength f on a separate right axis.
+- ORCA **spin–orbit coupling** spectra; "with SOC" / "without SOC" selectable per calculation.
+- ε tab: regression inset can be switched off (in addition to its table).
+- Fluorescence tab: size fields for structure and photos.
+- "(sh)" marking of shoulders in the figure is optional (off by default); table and Excel report keep it.
+
+### Changed
+- Results CSV has an additional column `ci95` (95 % confidence interval of ε).
+- Settings are no longer stored as `.uvvis.yaml` files next to the measurement files, and the overlay/
+  fluorescence tabs are no longer restored automatically at start – use project folders instead.
+
+### Fixed
+- ORCA output with spin–orbit coupling was read incorrectly (state labels such as "0-1.0A" were taken
+  as numbers, giving wrong energies and oscillator strengths). Please reload such calculations.
+
 ## 1.1.0 – 2026-10-05
 
 **Please check:** concentrations entered with 1.0.0 via the concentration dialog may have been
