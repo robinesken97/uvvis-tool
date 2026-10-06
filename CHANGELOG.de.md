@@ -29,6 +29,7 @@
   Fluoreszenz-Tab werden beim Start nicht mehr automatisch wiederhergestellt – dafür gibt es Projektordner.
 
 ### Korrigiert
+- Strukturen (CDXML, SVG, PDF) wurden zu knapp zugeschnitten: exakt senkrechte oder waagerechte Bindungen am Rand (z. B. =CH₂, CH₃) fehlten in Abbildungen und Exporten.
 - ORCA-Ausgaben mit Spin-Bahn-Kopplung wurden falsch gelesen (Zustandsnamen wie „0-1.0A“ wurden als
   Zahlen interpretiert, mit falschen Energien und Oszillatorstärken). Solche Rechnungen bitte neu laden.
 

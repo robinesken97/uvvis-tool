@@ -28,6 +28,7 @@
   fluorescence tabs are no longer restored automatically at start – use project folders instead.
 
 ### Fixed
+- Structures (CDXML, SVG, PDF) were cropped too tightly: bonds running exactly vertically or horizontally at the edge (e.g. =CH₂, CH₃) were cut off in figures and exports.
 - ORCA output with spin–orbit coupling was read incorrectly (state labels such as "0-1.0A" were taken
   as numbers, giving wrong energies and oscillator strengths). Please reload such calculations.
 

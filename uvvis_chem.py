@@ -59,9 +59,21 @@ def load_cdxml(path) -> dict:
 
     # Zeichnen: Koordinaten aus der CDXML behalten (auch gezeichnete H), ACS-1996-Stil
     dm = mol
-    d = rdMolDraw2D.MolDraw2DSVG(-1, -1)
+    # Feste, großzügige Zeichenfläche statt "flexicanvas": deren Größe hängt von Schriftmetriken ab,
+    # die unter Windows anders ausfallen -> Struktur wurde unten/rechts abgeschnitten.
+    # Der Rand wird später beim Einlesen auf den tatsächlichen Inhalt zugeschnitten.
+    bl = Draw.MeanBondLength(dm) or 1.0
+    pos = dm.GetConformer().GetPositions() if dm.GetNumConformers() else None
+    px_bl = 40.0                                       # Pixel pro Bindungslänge
+    if pos is not None and len(pos):
+        w = int((pos[:, 0].max() - pos[:, 0].min()) / bl * px_bl + 8 * px_bl)
+        h = int((pos[:, 1].max() - pos[:, 1].min()) / bl * px_bl + 8 * px_bl)
+    else:
+        w = h = int(12 * px_bl)
+    d = rdMolDraw2D.MolDraw2DSVG(max(w, 200), max(h, 200))
     opts = d.drawOptions()
-    Draw.SetACS1996Mode(opts, Draw.MeanBondLength(dm) or 1.0)
+    Draw.SetACS1996Mode(opts, bl)
+    opts.fixedBondLength = px_bl
     opts.clearBackground = False
     opts.prepareMolsBeforeDrawing = sanitized
     d.DrawMolecule(dm)

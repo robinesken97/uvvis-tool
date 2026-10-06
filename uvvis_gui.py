@@ -1725,6 +1725,16 @@ def selftest(outdir, with_isnet=False):
         assert XX.parse_tddft(soc, "nosoc")["variant"] == "nosoc"
         report.append("TD-DFT SOC: OK")
 
+        # Zuschnitt von Strukturen: senkrechte/waagerechte Endbindungen dürfen nicht abgeschnitten werden
+        import pymupdf
+        tdoc = pymupdf.open()
+        pg = tdoc.new_page(width=200, height=200)
+        pg.draw_line((50, 50), (150, 50), width=1)        # waagerecht
+        pg.draw_line((100, 50), (100, 160), width=1)      # senkrecht, reicht am weitesten nach unten
+        cr = IMG._content_rect(pg)
+        assert cr.y1 >= 160 and cr.x0 <= 50 and cr.x1 >= 150, cr
+        report.append("structure trimming: OK")
+
         # Overlay-Optionen: Skalierung, Versatz, Linienart, Strich-Modi
         w.ov_state["entries"][1].update(scale=0.8, offset=0.2, ls="dotted", lw=2.0)
         for mode in ("max", "band", "faxis"):

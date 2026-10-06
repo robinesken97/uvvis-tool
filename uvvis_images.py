@@ -293,23 +293,31 @@ def remove_background(arr, method="auto", cache_dir=None, src_path=None):
 # Strukturen: SVG/PDF als Vektor, CDXML über RDKit
 # ----------------------------------------------------------------------------
 def _content_rect(page):
-    """Begrenzungsrechteck des sichtbaren Inhalts (weiße Hintergrundflächen ignoriert)."""
+    """Begrenzungsrechteck des sichtbaren Inhalts (weiße Hintergrundflächen ignoriert).
+    Wichtig: exakt senkrechte/waagerechte Linien haben ein Rechteck der Breite bzw. Höhe 0, das
+    PyMuPDF als „leer“ behandelt und bei „|=“ verwirft – deshalb über Koordinaten vereinigen."""
     import pymupdf
-    r = pymupdf.Rect()
+    xs, ys = [], []
+
+    def add(rect, lw=0.0):
+        xs.extend([rect.x0 - lw, rect.x1 + lw])
+        ys.extend([rect.y0 - lw, rect.y1 + lw])
+
     for dr in page.get_drawings():
         fill, stroke = dr.get("fill"), dr.get("color")
         white = fill is not None and min(fill) > 0.97 and stroke is None
         if white and dr["rect"].get_area() > 0.5 * page.rect.get_area():
             continue
-        r |= dr["rect"]
+        add(dr["rect"], (dr.get("width") or 0) / 2)
     for b in page.get_text("dict")["blocks"]:
-        r |= pymupdf.Rect(b["bbox"])
+        add(pymupdf.Rect(b["bbox"]))
     for img in page.get_image_info():
-        r |= pymupdf.Rect(img["bbox"])
-    if r.is_empty:
+        add(pymupdf.Rect(img["bbox"]))
+    if not xs:
         return page.rect
-    pad = 2
-    return (r + (-pad, -pad, pad, pad)) & page.rect
+    pad = 3
+    r = pymupdf.Rect(min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
+    return r & page.rect
 
 
 def _vector_doc(path, svg_text=None):
