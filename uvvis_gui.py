@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -1732,6 +1732,20 @@ def selftest(outdir, with_isnet=False):
         opaque = ca["rgba"][..., 3] > 200
         assert ca["pdf"] and abs(int(np.median(ca["rgba"][opaque][:, 0])) - 232) < 3, "Einfärben"
         report.append("structure colour: OK")
+
+        # Neu platzierte Labels dürfen nicht auf gespeicherten landen (zwei Banden, eine gespeichert)
+        cfg_l = w.make_cfg("TEST-A")
+        cfg_l2, sp_l, res_l = core.prepare_series(cfg_l, w.groups["TEST-A"], "TEST-A")
+        figl = MplFigure(figsize=cfg_l2["figsize_in"], dpi=PREVIEW_DPI)
+        FigureCanvasAgg(figl)
+        auto = core.build_figure(plt, cfg_l2, sp_l, res_l, {}, fig=figl).current_layout()
+        lk = [k for k in auto if k.startswith("label_")]
+        assert len(lk) >= 2, lk
+        Fl = core.build_figure(plt, cfg_l2, sp_l, res_l, {lk[-1]: auto[lk[0]]}, fig=figl)
+        rl = Fl._renderer()
+        b0, b1 = (Fl.ann_items[k].get_window_extent(rl) for k in (lk[0], lk[-1]))
+        assert not b0.overlaps(b1), "Label-Kollision"
+        report.append("label collision: OK")
 
         # Overlay-Optionen: Skalierung, Versatz, Linienart, Strich-Modi
         w.ov_state["entries"][1].update(scale=0.8, offset=0.2, ls="dotted", lw=2.0)

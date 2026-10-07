@@ -1023,9 +1023,34 @@ class Figure:
                     warn_over.append(key)
             return hit
 
-        # 1) Labels zuerst: sie gehören an ihre Bande, alles andere ist verschiebbar
+        # 0) Alles mit gespeicherter (oder fester) Position zuerst eintragen. Sonst kann ein neu
+        #    hinzugekommenes Element (z. B. eine Bande, die erst jetzt genug Fitpunkte hat) genau auf
+        #    einem gespeicherten landen, weil dieses erst später in der Schleife eingetragen würde.
         x0, x1 = ax.get_xlim()
         fixed_lbl = {f"label_{float(k):g}": v for k, v in (self.cfg["labels"].get("pos") or {}).items()}
+        for key, ann in self.ann_items.items():
+            pos = lay.get(key) or fixed_lbl.get(key)
+            if pos:
+                ann.set_position(tuple(pos[:2]))
+                fs.block_rect(*self._measure_af(ann.get_window_extent(rend)))
+        if "inset" in self.axes_items:
+            icfg0 = self.cfg["inset"]
+            ipos = lay.get("inset") or (icfg0["pos"] if isinstance(icfg0["pos"], (list, tuple)) else None)
+            if ipos:
+                iax = self.axes_items["inset"]
+                aw0, ah0 = (ipos[2], ipos[3]) if len(ipos) == 4 else icfg0["size"]
+                self._set_axes_af(iax, ipos[0], ipos[1], aw0, ah0)
+                fs.block_rect(*self._measure_af(iax.get_tightbbox(rend)))
+        for im in self.cfg["images"]:
+            a = self.axes_items.get(im.get("_id", ""))
+            ppos = lay.get(im.get("_id", "")) or (im.get("pos") if isinstance(im.get("pos"), (list, tuple)) else None)
+            if a is not None and ppos:
+                w0, h0 = a._img_wh
+                if len(ppos) == 4:
+                    w0, h0 = ppos[2], ppos[2] * (h0 / w0 if w0 else 1.0)
+                fs.block_rect(ppos[0], ppos[1], w0, h0)
+
+        # 1) Labels: sie gehören an ihre Bande, alles andere ist verschiebbar
         for key, ann in self.ann_items.items():
             _, _, bw, bh = self._measure_af(ann.get_window_extent(rend))
             pos = lay.get(key) or fixed_lbl.get(key)

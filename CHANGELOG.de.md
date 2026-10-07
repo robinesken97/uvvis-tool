@@ -2,6 +2,15 @@
 
 # Änderungen
 
+## 1.2.3 – 06.10.2026
+
+### Korrigiert
+- Bei mehreren Banden konnten zwei Labels exakt übereinander liegen: Ein neu hinzugekommenes
+  Bandenlabel (z. B. weil die Bande nach einer Cutoff-Änderung genug Fitpunkte hatte) wurde platziert,
+  bevor die gespeicherten Positionen der anderen Labels berücksichtigt waren. Gespeicherte Positionen
+  von Labels, Inset und Bildern werden jetzt zuerst reserviert. Labels, die in einem gespeicherten
+  Projekt bereits übereinanderliegen, bleiben dort – eines wegziehen oder „Layout zurücksetzen“.
+
 ## 1.2.2 – 06.10.2026
 
 ### Geändert

@@ -2,6 +2,15 @@
 
 # Changelog
 
+## 1.2.3 – 2026-10-06
+
+### Fixed
+- With several bands, two labels could end up exactly on top of each other: a newly added band label
+  (e.g. after a cutoff change gave it enough fit points) was placed before the stored positions of
+  the other labels were taken into account. Stored positions of labels, inset and images are now
+  reserved first. Labels that already overlap in a saved project stay where they are – drag one away
+  or use "Reset layout".
+
 ## 1.2.2 – 2026-10-06
 
 ### Changed
