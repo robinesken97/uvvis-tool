@@ -2,6 +2,16 @@
 
 # Changelog
 
+## 1.2.2 – 2026-10-06
+
+### Changed
+- The preview fills the available space in all tabs and grows with the window; it stays true to
+  scale (only the display size changes, the exported figure is unchanged).
+
+### Fixed
+- Very small errors of ε were shown as "± 0" (e.g. 51 ± 0 for SE = 0.65); they are now rounded up
+  ("51 ± 1").
+
 ## 1.2.1 – 2026-10-06
 
 ### Added

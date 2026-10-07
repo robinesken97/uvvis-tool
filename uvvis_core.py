@@ -605,7 +605,12 @@ def fmt_ve(v, e=None, digits="auto", max_decimals=None):
     if max_decimals is not None:
         d = min(d, max_decimals)
     vs = f"{round(v, d):.{max(d, 0)}f}"
-    es = f"{round(e, d):.{max(d, 0)}f}" if (e is not None and np.isfinite(e)) else None
+    es = None
+    if e is not None and np.isfinite(e):
+        er = round(e, d)
+        if er == 0 and e > 0:                          # z. B. ε ganzzahlig, SE = 0,65 -> „± 1“ statt „± 0“
+            er = 10.0 ** (-d)
+        es = f"{er:.{max(d, 0)}f}"
     return vs.replace("-", "\u2212"), es
 
 

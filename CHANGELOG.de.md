@@ -2,6 +2,16 @@
 
 # Änderungen
 
+## 1.2.2 – 06.10.2026
+
+### Geändert
+- Die Vorschau füllt in allen Tabs den verfügbaren Platz und wächst mit dem Fenster; sie bleibt
+  maßstabsgetreu (nur die Anzeigegröße ändert sich, die exportierte Abbildung bleibt gleich).
+
+### Korrigiert
+- Sehr kleine Fehler von ε wurden als „± 0“ angezeigt (z. B. 51 ± 0 bei SE = 0,65); sie werden jetzt
+  aufgerundet („51 ± 1“).
+
 ## 1.2.1 – 06.10.2026
 
 ### Neu

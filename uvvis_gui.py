@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -477,12 +477,7 @@ class MainWindow(QMainWindow):
         lscroll.setMinimumWidth(380)
 
         # ---- rechte Seite
-        cscroll = QScrollArea()
-        holder = QWidget()
-        hl = QHBoxLayout(holder)
-        hl.addWidget(self.canvas, 0, Qt.AlignCenter)
-        cscroll.setWidget(holder)
-        cscroll.setWidgetResizable(True)
+        self.canvas_host = uvvis_tabs.CanvasHost(self.canvas, self.fig)
         self.tabs = QTabWidget()
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels([T("col_lam"), T("col_n"), T("col_coeff"),
@@ -500,7 +495,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.table, T("tab_results"))
         self.tabs.addTab(self.log, T("tab_log"))
         right = QSplitter(Qt.Vertical)
-        right.addWidget(cscroll)
+        right.addWidget(self.canvas_host)
         right.addWidget(self.tabs)
         right.setSizes([650, 220])
         split = QSplitter(Qt.Horizontal)
@@ -1290,10 +1285,7 @@ class MainWindow(QMainWindow):
             if self.dragger:
                 self.dragger.disconnect()
                 self.dragger = None
-            wpx, hpx = int(cfg2["figsize_in"][0] * PREVIEW_DPI), int(cfg2["figsize_in"][1] * PREVIEW_DPI)
-            if (self.canvas.width(), self.canvas.height()) != (wpx, hpx):
-                self.canvas.setFixedSize(wpx, hpx)
-                QApplication.processEvents()
+            self.canvas_host.set_figure_size(*cfg2["figsize_in"])
             self.F = core.build_figure(plt, cfg2, spectra, results, self.get_layout(g), fig=self.fig)
             self.dragger = GuiDragger(self.F, self.layout_changed)
             self.sync_image_sizes(self.F.current_layout())

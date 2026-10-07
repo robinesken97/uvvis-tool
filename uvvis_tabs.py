@@ -59,6 +59,41 @@ def color_button(color, on_pick):
     return b
 
 
+class CanvasHost(QWidget):
+    """Fläche für die Vorschau: skaliert die Abbildung auf den verfügbaren Platz.
+    Nur die Anzeige-dpi ändert sich – Positionen (Anteile) und Schriftgrößen (pt) bleiben, die
+    Vorschau ist also weiterhin maßstabsgetreu zum Export."""
+
+    def __init__(self, canvas, fig, margin=12):
+        super().__init__()
+        self.canvas, self.fig, self.margin = canvas, fig, margin
+        self.fig_in = (8.0, 6.0)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(canvas, 0, Qt.AlignCenter)
+        self.setMinimumSize(200, 150)
+
+    def set_figure_size(self, w_in, h_in):
+        self.fig_in = (float(w_in), float(h_in))
+        self.fit()
+
+    def fit(self):
+        w_in, h_in = self.fig_in
+        aw = max(100, self.width() - 2 * self.margin)
+        ah = max(80, self.height() - 2 * self.margin)
+        dpi = max(30.0, min(aw / w_in, ah / h_in))
+        ratio = getattr(self.canvas, "device_pixel_ratio", 1) or 1
+        self.fig._original_dpi = dpi                       # Basis für HiDPI-Skalierung durch matplotlib
+        self.fig._set_dpi(dpi * ratio, forward=False)
+        self.canvas.setFixedSize(int(round(w_in * dpi)), int(round(h_in * dpi)))
+        self.fig.set_size_inches(w_in, h_in, forward=False)
+        self.canvas.draw_idle()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        QTimer.singleShot(0, self.fit)
+
+
 class TabDragger(core.Dragger):
     def __init__(self, F, cb):
         self.cb = cb
@@ -123,15 +158,10 @@ class FigureTab(QWidget):
         ls.setWidget(left)
         ls.setWidgetResizable(True)
         ls.setMinimumWidth(480)
-        cs = QScrollArea()
-        holder = QWidget()
-        hl = QHBoxLayout(holder)
-        hl.addWidget(self.canvas, 0, Qt.AlignCenter)
-        cs.setWidget(holder)
-        cs.setWidgetResizable(True)
+        self.host = CanvasHost(self.canvas, self.fig)
         split = QSplitter(Qt.Horizontal)
         split.addWidget(ls)
-        split.addWidget(cs)
+        split.addWidget(self.host)
         split.setSizes([420, 900])
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -313,9 +343,7 @@ class FigureTab(QWidget):
                 self.dragger.disconnect()
                 self.dragger = None
             spec_cfg = self.base_cfg()
-            w, h = (int(v * PREVIEW_DPI) for v in spec_cfg["figsize_in"])
-            if (self.canvas.width(), self.canvas.height()) != (w, h):
-                self.canvas.setFixedSize(w, h)
+            self.host.set_figure_size(*spec_cfg["figsize_in"])
             self.F = self.build(self.fig)
             if self.F is None:
                 self.fig.clear()
