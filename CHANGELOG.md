@@ -2,6 +2,13 @@
 
 # Changelog
 
+## 1.2.4 – 2026-10-08
+
+### Added
+- The minimum R² for showing a band in the figure is adjustable (Analysis → "min. R² for figure",
+  default 0.98; 0 = show all bands with a fit). Bands below the threshold stay in the results table,
+  CSV and Excel report; their R² cell is marked red with a tooltip. The value is saved with the project.
+
 ## 1.2.3 – 2026-10-06
 
 ### Fixed

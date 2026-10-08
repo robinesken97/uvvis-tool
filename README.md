@@ -170,7 +170,10 @@ looks identical everywhere but cannot be edited in Word.
 - **Rounding:** ε (M⁻¹ cm⁻¹) is never shown with decimals; it is rounded to the precision its
   standard error supports. The results CSV keeps the full values.
 - **Warnings** (results table and log): fewer than 4 fit points, significant intercept (> 2σ),
-  R² < 0.98 (then not shown in the figure), fewer than 3 points (then no ε at all).
+  R² below the threshold (default 0.98, adjustable under Analysis → "min. R² for figure"; 0 = show
+  all; the band stays in the table – R² cell marked red –, CSV and Excel report but is not shown in the
+  figure), fewer than 3 points (then no ε at all). With 4 points, R² alone says little: check the
+  95 % confidence interval in the Excel report before lowering the threshold.
 
 ## Notes on CDXML
 

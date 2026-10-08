@@ -2,6 +2,14 @@
 
 # Änderungen
 
+## 1.2.4 – 08.10.2026
+
+### Neu
+- Das minimale R², ab dem eine Bande im Bild erscheint, ist einstellbar (Auswertung → „min. R² fürs
+  Bild“, Standard 0,98; 0 = alle Banden mit Fit zeigen). Banden unter der Schwelle bleiben in
+  Ergebnistabelle, CSV und Excel-Report; ihre R²-Zelle ist rot markiert (mit Tooltip). Der Wert wird im
+  Projekt gespeichert.
+
 ## 1.2.3 – 06.10.2026
 
 ### Korrigiert

@@ -173,7 +173,10 @@ In PDF und SVG bleibt die Struktur eine Vektorgrafik. Text steht im SVG als Pfad
 - **Rundung:** ε (M⁻¹ cm⁻¹) erscheint nie mit Nachkommastellen; gerundet wird auf die Genauigkeit,
   die sein Standardfehler hergibt. Die Ergebnis-CSV enthält die vollen Werte.
 - **Warnungen** (Ergebnistabelle und Protokoll): weniger als 4 Fitpunkte, signifikanter
-  Achsenabschnitt (> 2σ), R² < 0,98 (dann nicht im Bild), weniger als 3 Punkte (dann gar kein ε).
+  Achsenabschnitt (> 2σ), R² unter der Schwelle (Standard 0,98, einstellbar unter Auswertung →
+  „min. R² fürs Bild“; 0 = alle zeigen; die Bande bleibt in Tabelle – R²-Zelle rot markiert –, CSV und
+  Excel-Report, erscheint aber nicht im Bild), weniger als 3 Punkte (dann gar kein ε). Bei 4 Punkten
+  sagt R² allein wenig: vor dem Absenken der Schwelle das 95-%-Konfidenzintervall im Excel-Report prüfen.
 
 ## Hinweise zu CDXML
 

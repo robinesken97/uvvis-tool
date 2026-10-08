@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -118,7 +118,7 @@ DEFAULT_GLOB = {"path_length": 1.0, "cutoff": 1.0, "min_points": 3, "bands": "",
                 "fmt_pdf": True, "fmt_svg": True, "fmt_png": True,
                 "x_auto": True, "x_min": 200.0, "x_max": 1100.0,
                 "bands_add": True, "shoulders": False, "show_excl": False, "inset": True,
-                "mark_sh": False}
+                "mark_sh": False, "min_r2": 0.98}
 
 UNITS = [("mM", "mM"), ("uM", "µM"), ("mg/mL", "mg/mL"), ("M", "M")]
 
@@ -388,6 +388,9 @@ class MainWindow(QMainWindow):
         f.addRow(T("cutoff"), self.sp_cut)
         self.sp_min = QSpinBox(minimum=2, maximum=20)
         f.addRow(T("min_points"), self.sp_min)
+        self.sp_r2 = QDoubleSpinBox(decimals=3, minimum=0.0, maximum=1.0, singleStep=0.005)
+        self.sp_r2.setToolTip(T("min_r2_tip"))
+        f.addRow(T("min_r2"), self.sp_r2)
         self.ed_bands = QLineEdit()
         self.ed_bands.setPlaceholderText(T("wavelengths_ph"))
         f.addRow(T("wavelengths"), self.ed_bands)
@@ -522,6 +525,7 @@ class MainWindow(QMainWindow):
         for cb in (self.cb_pdf, self.cb_svg, self.cb_png):
             cb.toggled.connect(lambda *_: self.collect_globals())
         self.sp_min.valueChanged.connect(self.changed)
+        self.sp_r2.valueChanged.connect(self.changed)
         self.ed_bands.editingFinished.connect(self.changed)
         for w in (self.cmb_bl, self.cmb_r2):
             w.currentIndexChanged.connect(self.changed)
@@ -535,6 +539,7 @@ class MainWindow(QMainWindow):
         self.sp_d.setValue(gl["path_length"])
         self.sp_cut.setValue(gl["cutoff"])
         self.sp_min.setValue(gl["min_points"])
+        self.sp_r2.setValue(gl.get("min_r2", 0.98))
         self.ed_bands.setText(gl["bands"])
         self.cmb_bl.setCurrentIndex(self.cmb_bl.findData(gl["baseline"]))
         self.sp_bla.setValue(gl["bl_a"])
@@ -568,7 +573,7 @@ class MainWindow(QMainWindow):
 
     def collect_globals(self):
         self.glob.update(path_length=self.sp_d.value(), cutoff=self.sp_cut.value(),
-                         min_points=self.sp_min.value(), bands=self.ed_bands.text().strip(),
+                         min_points=self.sp_min.value(), min_r2=self.sp_r2.value(), bands=self.ed_bands.text().strip(),
                          baseline=self.cmb_bl.currentData(), bl_a=self.sp_bla.value(),
                          bl_b=self.sp_blb.value(), ymax=self.sp_ymax.value(),
                          r2=self.cmb_r2.currentData(), show_err=self.cb_err.isChecked(),
@@ -1231,6 +1236,7 @@ class MainWindow(QMainWindow):
         cfg["path_length_cm"] = gl["path_length"]
         cfg["max_abs_fit"] = gl["cutoff"]
         cfg["min_fit_points"] = gl["min_points"]
+        cfg["min_r2"] = gl.get("min_r2", 0.98)
         try:
             bands = [float(x) for x in gl["bands"].replace(";", ",").split(",") if x.strip()]
         except ValueError:
@@ -1382,6 +1388,10 @@ class MainWindow(QMainWindow):
                     it.setCheckState(Qt.Unchecked if hidden else Qt.Checked)
                 elif j != 5:
                     it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    if j == 4 and ft and ft["r2"] < cfg["min_r2"]:   # unter R²-Schwelle -> nicht im Bild
+                        it.setBackground(QColor("#f4cccc"))
+                        it.setForeground(QColor("#000000"))
+                        it.setToolTip(T("r2_below", min=cfg["min_r2"]))
                 elif abs(cut - cfg["max_abs_fit"]) > 1e-9:
                     it.setBackground(QColor("#fff2cc"))
                     it.setForeground(QColor("#000000"))
@@ -1693,6 +1703,19 @@ def selftest(outdir, with_isnet=False):
         lams = {int(round(r["lam_requested"])): r for r in res_t}
         assert 600 in lams and lams[600].get("hidden") and lams[484]["cutoff"] == 2.0, sorted(lams)
         report.append("bands/shoulders/cutoff: OK")
+        # einstellbare R²-Schwelle: 1.0 blendet alles aus, 0 zeigt alles mit Fit
+        w.series["TEST-A"]["band_hidden"] = []
+        for thr, expect_hidden in ((1.0, True), (0.0, False)):
+            w.glob["min_r2"] = thr
+            w.apply_globals()
+            assert abs(w.sp_r2.value() - thr) < 1e-9
+            w.collect_globals()
+            _, _, res_r = core.prepare_series(w.make_cfg("TEST-A"), w.groups["TEST-A"], "TEST-A")
+            fitted = [r for r in res_r if r["fit"]]
+            assert fitted and all(bool(r.get("hidden")) == expect_hidden for r in fitted), (thr, res_r)
+        w.glob["min_r2"] = 0.98
+        w.apply_globals()
+        report.append("min. R² threshold: OK")
 
         def pump(sec=0.4):
             import time
