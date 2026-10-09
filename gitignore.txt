@@ -1,0 +1,13 @@
+build/
+dist/
+venv/
+__pycache__/
+*.spec
+selftest_*/
+.uvvis_cache/
+*.uvvis.yaml
+# Messdaten nicht ins Repository (öffentliche Repos!):
+*.csv
+*.heic
+*.HEIC
+*.cdxml

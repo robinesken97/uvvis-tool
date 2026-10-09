@@ -21,7 +21,10 @@ Lade unter **Releases** (rechts auf der Repository-Seite) die Datei für dein Sy
 Die App ist nicht signiert, deshalb warnt das Betriebssystem beim ersten Start:
 
 - **Windows (SmartScreen):** „Weitere Informationen“ → „Trotzdem ausführen“.
-- **macOS (Gatekeeper):** Rechtsklick auf `UVVisTool.app` → „Öffnen“ → „Öffnen“.
+- **macOS (Gatekeeper):** `UVVisTool.app` in „Programme“ ziehen und einmal doppelklicken (wird blockiert).
+  Dann Systemeinstellungen → Datenschutz & Sicherheit → ganz unten „Dennoch öffnen“ → mit Passwort/Touch ID
+  bestätigen. Ab macOS 15 funktioniert der frühere Weg „Rechtsklick → Öffnen“ nicht mehr. Alternativ im
+  Terminal: `xattr -dr com.apple.quarantine /Applications/UVVisTool.app`. Nur für Apple-Silicon-Macs (M1 und neuer).
 
 Unter Windows immer den ganzen Ordner `UVVisTool` zusammenlassen. Die `.exe` funktioniert nicht ohne den Ordner `_internal` daneben.
 

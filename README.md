@@ -21,7 +21,10 @@ Download the file for your system from **Releases** (right-hand side of the repo
 The app is not code-signed, so the operating system will warn you on first launch:
 
 - **Windows (SmartScreen):** "More info" → "Run anyway".
-- **macOS (Gatekeeper):** right-click `UVVisTool.app` → "Open" → "Open".
+- **macOS (Gatekeeper):** drag `UVVisTool.app` to Applications and double-click it once (it gets blocked).
+  Then System Settings → Privacy & Security → at the bottom "Open Anyway" → confirm with password/Touch ID.
+  Since macOS 15 the old "right-click → Open" route no longer works. Alternatively in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/UVVisTool.app`. Apple Silicon Macs only (M1 and newer).
 
 On Windows, always keep the whole `UVVisTool` folder together. The `.exe` does not work without the `_internal` folder next to it.
 
