@@ -210,15 +210,15 @@ class SimpleFigure(core.Figure):
                                lw=max(0.6, cfg["line_width"]), alpha=0.8)
                     fmax = max(fmax, float(st["h"][sel].max()))
             ax2.set_ylim(0, (fmax or 1.0) * 1.1)
-            ax2.set_ylabel("oscillator strength f", fontsize=cfg["font_size"] * 1.3)
+            ax2.set_ylabel(core.fmt_text("oscillator strength f", cfg), fontsize=cfg["font_size"] * 1.3)
             sc = cfg.get("scale", 1.0)
             ax2.tick_params(direction=cfg["tick_direction"], length=6 * sc, width=max(0.6, sc))
             ax2.spines["top"].set_visible(False)
             self.ax2 = ax2
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        ax.set_xlabel(cfg["xlabel"], fontsize=cfg["font_size"] * 1.3)
-        ax.set_ylabel(cfg["ylabel"], fontsize=cfg["font_size"] * 1.3)
+        ax.set_xlabel(core.fmt_text(cfg["xlabel"], cfg), fontsize=cfg["font_size"] * 1.3)
+        ax.set_ylabel(core.fmt_text(cfg["ylabel"], cfg), fontsize=cfg["font_size"] * 1.3)
         ax.minorticks_on()
         ax.tick_params(which="both", direction=cfg["tick_direction"], top=False, right=False)
         sc = cfg.get("scale", 1.0)
@@ -261,10 +261,10 @@ class SimpleFigure(core.Figure):
 
     def _make_labels(self, labels):
         for lab in labels:
-            ann = self.ax.annotate(lab["text"], xy=(lab["lam"], 0), xycoords="data",
-                                   xytext=(0.5, 0.5), textcoords="axes fraction", ha="left",
-                                   va="bottom", fontsize=self.cfg["labels"]["font_size"],
-                                   linespacing=1.4, annotation_clip=False, zorder=5)
+            ann = self.ax.annotate(core.fmt_text(lab["text"], self.cfg, label=True), xy=(lab["lam"], 0),
+                                   xycoords="data", xytext=(0.5, 0.5), textcoords="axes fraction",
+                                   ha="left", va="bottom", linespacing=1.4, annotation_clip=False,
+                                   zorder=5, **core.label_kw(self.cfg))
             self.ann_items[lab["key"]] = ann
 
     def _place(self):
@@ -279,7 +279,9 @@ class SimpleFigure(core.Figure):
         fs = core.FreeSpace()
         fs.block_below(self._envelope(fs.n))
         for a in self.axes_items.values():
-            fs.block_rect(*self._measure_af(a.get_tightbbox(rend)))
+            fr = getattr(a, "_frame", None)
+            bb = fr.get_window_extent(rend) if fr is not None else a.get_tightbbox(rend)
+            fs.block_rect(*self._measure_af(bb))
         for ann in self.ann_items.values():
             fs.block_rect(*self._measure_af(ann.get_window_extent(rend)))
         _, _, w, h = self._measure_af(self.legend.get_window_extent(rend))

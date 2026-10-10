@@ -311,6 +311,27 @@ TEXTS = {
                  "fills the selected rows (or all) top to bottom: start, start/factor, …"),
     "conc_none": ("Keine Probe mit Konzentration – nichts auszuwerten.",
                   "No sample with a concentration – nothing to analyse."),
+    # ---- Format (Schrift, Rahmen) -----------------------------------------
+    "menu_format": ("F&ormat", "F&ormat"),
+    "act_text_format": ("Schrift und Rahmen…", "Fonts and frames…"),
+    "tf_title": ("Schrift und Rahmen (alle Tabs)", "Fonts and frames (all tabs)"),
+    "tf_grp_fonts": ("Schriften", "Fonts"),
+    "tf_font": ("Textschrift", "Text font"),
+    "tf_symbol_font": ("Symbolschrift", "Symbol font"),
+    "tf_greek": ("Griechische Buchstaben (λ, ε) in der Symbolschrift",
+                 "Greek letters (λ, ε) in the symbol font"),
+    "tf_grp_labels": ("Labels an den Banden (λ / ε)", "Band labels (λ / ε)"),
+    "tf_label_size": ("Schriftgröße", "Font size"),
+    "tf_auto": ("automatisch", "automatic"),
+    "tf_bold": ("fett", "bold"),
+    "tf_italic": ("kursiv", "italic"),
+    "tf_color": ("Farbe", "Colour"),
+    "tf_grp_frames": ("Rahmen", "Frames"),
+    "tf_axes_frame": ("Geschlossener Rahmen um den Plot (auch oben und rechts)",
+                      "Closed frame around the plot (top and right too)"),
+    "tf_struct_frame": ("Abgerundeter Rahmen um die Struktur", "Rounded frame around the structure"),
+    "tf_missing": ("Schrift „{name}“ nicht gefunden – Ersatzschrift wird verwendet.",
+                   "Font “{name}” not found – using a fallback font."),
 }
 
 

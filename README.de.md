@@ -164,6 +164,16 @@ SVG funktioniert in Word 2019, 2021 und Microsoft 365. Bei älteren Versionen da
 In PDF und SVG bleibt die Struktur eine Vektorgrafik. Text steht im SVG als Pfade, sieht also
 überall gleich aus, lässt sich in Word aber nicht bearbeiten.
 
+## Schrift und Rahmen
+
+Format → „Schrift und Rahmen…“ gilt für alle Tabs und wird im Projekt gespeichert:
+
+- **Textschrift** und **Symbolschrift**. λ und ε stehen standardmäßig in der Symbolschrift
+  (Times New Roman), wie in Origin; abschaltbar.
+- **Bandenlabels:** Schriftgröße (standardmäßig automatisch), fett, kursiv, Farbe.
+- **Rahmen:** geschlossener Rahmen um den Plot (auch oben und rechts) und abgerundeter Rahmen um die
+  Strukturformel.
+
 ## Was bei der Auswertung automatisch passiert
 
 - **Basislinie** („automatisch (Reihe)“, Standard): Das Fenster liegt dort, wo die konzentrierteste

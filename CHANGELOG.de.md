@@ -2,6 +2,20 @@
 
 # Änderungen
 
+## 1.3.0 – 10.10.2026
+
+### Neu
+- Neues Menü Format → „Schrift und Rahmen…“ (gilt für alle Tabs, wird im Projekt gespeichert):
+  - Textschrift und Symbolschrift wählbar (Standard Arial und Times New Roman).
+  - Bandenlabels: Schriftgröße (Standard automatisch), fett, kursiv und Farbe.
+  - Optional geschlossener Rahmen um den Plot (Linie auch oben und rechts).
+  - Optional abgerundeter Rahmen um die Strukturformel; er wandert mit der Struktur, und die
+    automatische Platzierung hält Labels und Inset davon frei.
+
+### Geändert
+- Griechische Buchstaben (λ, ε) stehen standardmäßig in der Symbolschrift – in den Labels, der
+  Inset-Tabelle, der Overlay-Achse und bei λem im Fluoreszenz-Tab. Abschaltbar im Format-Dialog.
+
 ## 1.2.4 – 08.10.2026
 
 ### Neu

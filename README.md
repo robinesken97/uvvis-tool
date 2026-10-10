@@ -161,6 +161,16 @@ SVG works in Word 2019, 2021 and Microsoft 365. For older versions use the PNG (
 In PDF and SVG the structure remains vector graphics. Text in the SVG is stored as paths, so it
 looks identical everywhere but cannot be edited in Word.
 
+## Fonts and frames
+
+Format → "Fonts and frames…" applies to all tabs and is saved with the project:
+
+- **Text font** and **symbol font**. By default λ and ε are set in the symbol font (Times New Roman),
+  as in Origin; this can be switched off.
+- **Band labels:** font size (automatic by default), bold, italic, colour.
+- **Frames:** closed frame around the plot (top and right too) and a rounded frame around the
+  chemical structure.
+
 ## What happens automatically during the analysis
 
 - **Baseline** ("automatic (series)", default): the window is placed where the most concentrated

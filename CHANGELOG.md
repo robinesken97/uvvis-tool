@@ -2,6 +2,20 @@
 
 # Changelog
 
+## 1.3.0 – 2026-10-10
+
+### Added
+- New menu Format → "Fonts and frames…" (applies to all tabs, saved with the project):
+  - Text font and symbol font are selectable (default Arial and Times New Roman).
+  - Band labels: font size (default automatic), bold, italic and colour.
+  - Optional closed frame around the plot (line on the top and right as well).
+  - Optional rounded frame around the chemical structure; it moves with the structure, and the
+    automatic placement keeps labels and inset clear of it.
+
+### Changed
+- Greek letters (λ, ε) are set in the symbol font by default – in the labels, the inset table,
+  the overlay axis and λem in the fluorescence tab. This can be switched off in the Format dialog.
+
 ## 1.2.4 – 2026-10-08
 
 ### Added

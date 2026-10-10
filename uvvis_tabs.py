@@ -310,6 +310,7 @@ class FigureTab(QWidget):
         cfg["_base_dir"] = Path.home()
         if st["size"] != "std":
             core.apply_export_size(cfg, st["w_cm"], st["h_cm"])
+        core.apply_text_format(cfg, self.main.text_fmt)
         fmts = [e for e in ("pdf", "svg", "png") if st["fmt"].get(e)] or ["pdf"]
         cfg["_main_fmt"], cfg["extra_formats"] = fmts[0], fmts[1:]
         return cfg

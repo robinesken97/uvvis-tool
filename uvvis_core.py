@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import matplotlib.patches
+import matplotlib.transforms
 import numpy as np
 import yaml
 from PIL import Image
@@ -46,6 +48,9 @@ DEFAULTS = {
     "scale": 1.0,                            # wird aus size_cm berechnet
     "axes_rect": [0.12, 0.13, 0.85, 0.84],   # Position der Hauptachse in Figurkoordinaten
     "font": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
+    "symbol_font": ["Times New Roman", "Liberation Serif", "Nimbus Roman", "DejaVu Serif"],
+    "greek_symbol_font": True,               # griechische Buchstaben (λ, ε) in der Symbolschrift
+    "structure_frame": False,                # Rechteck um die Strukturformel
     "font_size": 16,
     "path_length_cm": 1.0,
     "conc_unit": "mM",                       # mM | uM | M | mg/mL
@@ -87,6 +92,9 @@ DEFAULTS = {
         "eps_unit": r"cm$^{-1}$ M$^{-1}$",
         "mark_shoulders": False,             # „(sh)“ an Schultern in der Abbildung
         "font_size": 15,
+        "color": "#000000",
+        "bold": False,
+        "italic": False,
         "pos": {},                           # optional fest: {336: [x, y]} in Achsenbruchteilen
     },
     "inset": {
@@ -164,6 +172,116 @@ def apply_export_size(cfg, w_cm, h_cm):
     cfg["inset"]["font_size"] = max(5.5, DEFAULTS["inset"]["font_size"] * s)
     cfg["inset"]["table_font_size"] = max(5.0, DEFAULTS["inset"]["table_font_size"] * s)
     return cfg
+
+
+# Textformat aus der GUI (Menü Format): gilt für alle Tabs, wird im Projekt gespeichert
+TEXT_DEFAULTS = {"font": "Arial", "symbol_font": "Times New Roman", "greek": True, "label_pt": 0.0,
+                 "bold": False, "italic": False, "color": "#000000", "struct_frame": False,
+                 "axes_frame": False}
+
+
+def apply_text_format(cfg, tf):
+    """Textformat übernehmen. Nach apply_export_size aufrufen (setzt die Labelgröße sonst zurück)."""
+    tf = dict(TEXT_DEFAULTS, **(tf or {}))
+    cfg["font"] = list(dict.fromkeys([tf["font"]] + DEFAULTS["font"]))
+    cfg["symbol_font"] = list(dict.fromkeys([tf["symbol_font"]] + DEFAULTS["symbol_font"]))
+    cfg["greek_symbol_font"] = bool(tf["greek"])
+    cfg["structure_frame"] = bool(tf["struct_frame"])
+    cfg["frame"] = bool(tf["axes_frame"])
+    lc = cfg["labels"]
+    lc.update(bold=bool(tf["bold"]), italic=bool(tf["italic"]), color=tf["color"] or "#000000")
+    if tf["label_pt"] and tf["label_pt"] > 0:
+        lc["font_size"] = float(tf["label_pt"])
+    return cfg
+
+
+_GREEK = re.compile("[Α-Ωα-ωϑϕϵ]")
+_TEX_GREEK = {"alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "Delta": "Δ", "epsilon": "ϵ",
+              "varepsilon": "ε", "eta": "η", "theta": "θ", "lambda": "λ", "mu": "μ", "nu": "ν", "pi": "π",
+              "sigma": "σ", "tau": "τ", "phi": "φ", "chi": "χ", "omega": "ω", "Omega": "Ω"}
+_TEX_GREEK_RE = re.compile(r"\\(" + "|".join(sorted(_TEX_GREEK, key=len, reverse=True)) + r")(?![A-Za-z])")
+_FONT_CMDS = ("mathrm", "mathit", "mathbf", "mathbfit", "mathsf", "mathcal", "mathtt")
+
+
+def _wrap_math(p, cmd):
+    """Mathtext-Inhalt fett/kursiv setzen: jeder Zeichenlauf -> {\\cmd{…}}, Befehle bleiben."""
+    out, buf, i = [], [], 0
+
+    def flush():
+        if buf:
+            out.append("{\\%s{%s}}" % (cmd, "".join(buf)))
+            buf.clear()
+    while i < len(p):
+        c = p[i]
+        if c == "\\":
+            flush()
+            m = re.match(r"\\([A-Za-z]+)", p[i:])
+            if not m:
+                out.append(p[i:i + 2])
+                i += 2
+                continue
+            name = m.group(1)
+            i += len(m.group(0))
+            if name in _FONT_CMDS and i < len(p) and p[i] == "{":
+                depth, j = 0, i
+                while j < len(p):
+                    depth += {"{": 1, "}": -1}.get(p[j], 0)
+                    if depth == 0:
+                        break
+                    j += 1
+                arg = p[i + 1:j]
+                i = j + 1
+                # Symbolschrift (sf/cal) behält ihre Schrift, normale Schriftbefehle bekommen den Stil
+                out.append("{\\%s{%s}}" % (cmd, arg) if name in ("mathrm", "mathit", "mathbf")
+                           else "\\%s{%s}" % (name, arg))
+            else:
+                out.append("\\" + name)
+        elif c in "{}^_ ":
+            flush()
+            out.append(c)
+            i += 1
+        else:
+            buf.append(c)
+            i += 1
+    flush()
+    return "".join(out)
+
+
+def fmt_text(s, cfg, label=False):
+    """Griechische Buchstaben in die Symbolschrift setzen (Labels: \\mathsf mit Labelstil, sonst
+    \\mathcal, beide in setup_fonts belegt). Für Labels Mathtext zusätzlich fett/kursiv."""
+    if not s or not isinstance(s, str):
+        return s
+    greek = cfg.get("greek_symbol_font", True)
+    lc = cfg.get("labels") or {}
+    wrap = {(True, False): "mathbf", (False, True): "mathit", (True, True): "mathbfit"}.get(
+        (bool(lc.get("bold")), bool(lc.get("italic")))) if label else None
+    if not (greek or wrap):
+        return s
+    parts = s.split("$")
+    if len(parts) % 2 == 0:                    # unpaariges $: lieber nichts anfassen
+        return s
+    slot = "mathsf" if label else "mathcal"
+
+    def sym(ch):
+        return "\\%s{%s}" % (slot, ch)
+    out = []
+    for i, p in enumerate(parts):
+        if i % 2 == 0:
+            out.append(_GREEK.sub(lambda m: "$" + sym(m.group()) + "$", p) if greek else p)
+        else:
+            if greek:
+                p = _GREEK.sub(lambda m: sym(m.group()), p)      # zuerst Unicode, sonst doppelt
+                p = _TEX_GREEK_RE.sub(lambda m: sym(_TEX_GREEK[m.group(1)]), p)
+            out.append("$" + (_wrap_math(p, wrap) if wrap else p) + "$")
+    return "".join(out).replace("$$", "")      # λ$_{em}$ -> ein Mathe-Block: Index sitzt richtig
+
+
+def label_kw(cfg):
+    lc = cfg["labels"]
+    return dict(fontsize=lc["font_size"], color=lc.get("color") or "black",
+                fontweight="bold" if lc.get("bold") else "normal",
+                fontstyle="italic" if lc.get("italic") else "normal")
 
 
 def eps_max_decimals(cfg):
@@ -764,17 +882,22 @@ def anchor_score(ax_, ay_):
 # ----------------------------------------------------------------------------
 # Plot
 # ----------------------------------------------------------------------------
-def setup_fonts(plt, cfg):
+def first_font(names, default):
     from matplotlib import font_manager as fm
-    family = None
-    for name in cfg["font"]:
+    for name in names:
         try:
             fm.findfont(fm.FontProperties(family=name), fallback_to_default=False)
-            family = name
-            break
+            return name
         except Exception:
             continue
-    family = family or "DejaVu Sans"
+    return default
+
+
+def setup_fonts(plt, cfg):
+    family = first_font(cfg["font"], "DejaVu Sans")
+    sym = first_font(cfg.get("symbol_font") or DEFAULTS["symbol_font"], "DejaVu Serif")
+    lc = cfg.get("labels") or {}
+    sym_lbl = sym + (":bold" if lc.get("bold") else "") + (":italic" if lc.get("italic") else "")
     plt.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": [family] + cfg["font"],
@@ -783,11 +906,40 @@ def setup_fonts(plt, cfg):
         "mathtext.rm": family,
         "mathtext.it": f"{family}:italic",
         "mathtext.bf": f"{family}:bold",
-        "mathtext.sf": family, "mathtext.cal": family, "mathtext.tt": family,
+        "mathtext.bfit": f"{family}:bold:italic", "mathtext.tt": family,
+        # Symbolschrift für griechische Buchstaben (fmt_text): cal = normal, sf = im Labelstil
+        "mathtext.cal": sym, "mathtext.sf": sym_lbl,
         "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
         "axes.linewidth": max(0.6, cfg.get("scale", 1.0)),
     })
     return family
+
+
+class _ImageFrame(matplotlib.patches.FancyBboxPatch):
+    """Abgerundeter Rahmen um ein Bild (Struktur). Hängt an der Figur, nicht an der Bildachse:
+    die Achse wird beim Vektorexport ausgeblendet, der Rahmen muss bleiben. Position wird bei
+    jedem Zeichnen aus der Bildachse berechnet (folgt also dem Ziehen mit der Maus)."""
+
+    def __init__(self, target, pad_pt, radius_pt, lw):
+        super().__init__((0, 0), 1, 1, boxstyle="round,pad=0,rounding_size=1", fill=False,
+                         ec="black", lw=lw, transform=matplotlib.transforms.IdentityTransform(),
+                         zorder=4)
+        self._target, self._pad_pt, self._radius_pt = target, pad_pt, radius_pt
+
+    def _update(self):
+        dpi = self.figure.dpi
+        bb = self._target.get_window_extent()
+        p = self._pad_pt * dpi / 72
+        self.set_bounds(bb.x0 - p, bb.y0 - p, bb.width + 2 * p, bb.height + 2 * p)
+        self.set_boxstyle("round", pad=0, rounding_size=self._radius_pt * dpi / 72)
+
+    def draw(self, renderer):
+        self._update()
+        super().draw(renderer)
+
+    def get_window_extent(self, renderer=None):
+        self._update()
+        return super().get_window_extent(renderer)
 
 
 class Figure:
@@ -825,8 +977,8 @@ class Figure:
                     lw=cfg["line_width"], solid_joinstyle="round", solid_capstyle="butt")
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        ax.set_xlabel(cfg["xlabel"], fontsize=cfg["font_size"] * 1.3)
-        ax.set_ylabel(cfg["ylabel"], fontsize=cfg["font_size"] * 1.3)
+        ax.set_xlabel(fmt_text(cfg["xlabel"], cfg), fontsize=cfg["font_size"] * 1.3)
+        ax.set_ylabel(fmt_text(cfg["ylabel"], cfg), fontsize=cfg["font_size"] * 1.3)
         ax.minorticks_on()
         ax.tick_params(which="both", direction=cfg["tick_direction"], top=False, right=False)
         sc = cfg.get("scale", 1.0)
@@ -901,8 +1053,9 @@ class Figure:
                 cc = np.array([c for c, _ in r["used"]])
                 xx = np.array([cc.min(), cc.max()])
                 iax.plot(xx, ft["slope"] * xx + ft["intercept"], "-", color=col, lw=0.9, zorder=2)
-        iax.set_xlabel(icfg["xlabel"] or f"c [{self.cfg['conc_unit']}]", fontsize=fs, labelpad=1)
-        iax.set_ylabel(icfg["ylabel"], fontsize=fs, labelpad=1)
+        iax.set_xlabel(fmt_text(icfg["xlabel"] or f"c [{self.cfg['conc_unit']}]", self.cfg), fontsize=fs,
+                       labelpad=1)
+        iax.set_ylabel(fmt_text(icfg["ylabel"], self.cfg), fontsize=fs, labelpad=1)
         iax.tick_params(labelsize=fs * 0.9, direction="out", length=3, pad=1.5)
         iax.set_ylim(bottom=0)
         iax.set_xlim(left=0)
@@ -919,7 +1072,8 @@ class Figure:
                 rows.append([f"{r['lam']:g}", f"{s} ± {se}" if se else s,
                              f"{b} ± {be}" if be else b, f"{ft['r2']:.4f}"])
             cu_s = f"({cu})" if "/" in cu else cu
-            header = ["λ [nm]", f"slope [cm$^{{-1}}$ {cu_s}$^{{-1}}$]", r"intercept [cm$^{-1}$]", "R$^2$"]
+            header = [fmt_text(h, self.cfg) for h in
+                      ("λ [nm]", f"slope [cm$^{{-1}}$ {cu_s}$^{{-1}}$]", r"intercept [cm$^{-1}$]", "R$^2$")]
             tfs = icfg["table_font_size"]
             h_in = self.fig.get_size_inches()[1] * self.ax.get_position().height * icfg["size"][1]
             row_h = tfs * 1.55 / 72 / h_in
@@ -953,10 +1107,10 @@ class Figure:
             txt = f"λ =  {r['lam']:g} nm{sh}\n{sym} =  {eps} {unit}"
             if self.cfg["r2_mode"] == "label":
                 txt += f"\n$R^2$ =  {r['fit']['r2']:.4f}"
-            ann = self.ax.annotate(txt, xy=(r["lam"], 0), xycoords="data",
+            ann = self.ax.annotate(fmt_text(txt, self.cfg, label=True), xy=(r["lam"], 0), xycoords="data",
                                    xytext=(0.5, 0.5), textcoords="axes fraction",
-                                   ha="left", va="bottom", fontsize=lcfg["font_size"],
-                                   linespacing=1.4, annotation_clip=False, zorder=5)
+                                   ha="left", va="bottom", linespacing=1.4, annotation_clip=False,
+                                   zorder=5, **label_kw(self.cfg))
             self.ann_items[f"label_{r['lam']:g}"] = ann
 
     # -- Bilder --------------------------------------------------------------
@@ -976,6 +1130,12 @@ class Figure:
             a._img_wh = (w, h)
             a._vector = (asset["pdf"], asset["clip"]) if asset.get("pdf") else None
             self._set_axes_af(a, 0.5, 0.5, w, h)
+            a._frame = None
+            frame = im.get("frame", self.cfg.get("structure_frame") and str(im.get("id", "")).startswith("struktur"))
+            if frame:
+                sc = self.cfg.get("scale", 1.0)
+                a._frame = self.fig.add_artist(_ImageFrame(a, pad_pt=6 * sc, radius_pt=8 * sc,
+                                                           lw=max(0.6, 0.9 * sc)))
             iid = im.get("id") or Path(im["file"]).stem
             self.axes_items[f"image_{iid}"] = a
             im["_id"] = f"image_{iid}"
@@ -998,6 +1158,15 @@ class Figure:
         inv = self.ax.transAxes.inverted()
         (x0, y0), (x1, y1) = inv.transform([[bb.x0, bb.y0], [bb.x1, bb.y1]])
         return x0, y0, x1 - x0, y1 - y0
+
+    def _frame_pad(self, a):
+        """Rand eines Bildrahmens in Achsenbruchteilen (0, wenn das Bild keinen Rahmen hat)."""
+        fr = getattr(a, "_frame", None)
+        if fr is None:
+            return 0.0, 0.0
+        p = (fr._pad_pt * self.fig.dpi + fr.get_linewidth() * self.fig.dpi) / 72
+        ab = self.ax.get_window_extent()
+        return p / ab.width, p / ab.height
 
     def _renderer(self):
         # eigener Agg-Renderer mit fig.dpi: unabhängig von GUI-Backend/HiDPI-Skalierung
@@ -1048,7 +1217,8 @@ class Figure:
                 w0, h0 = a._img_wh
                 if len(ppos) == 4:
                     w0, h0 = ppos[2], ppos[2] * (h0 / w0 if w0 else 1.0)
-                fs.block_rect(ppos[0], ppos[1], w0, h0)
+                px, py = self._frame_pad(a)
+                fs.block_rect(ppos[0] - px, ppos[1] - py, w0 + 2 * px, h0 + 2 * py)
 
         # 1) Labels: sie gehören an ihre Bande, alles andere ist verschiebbar
         for key, ann in self.ann_items.items():
@@ -1105,17 +1275,19 @@ class Figure:
             key = im["_id"]
             a = self.axes_items[key]
             w, h = a._img_wh
+            px, py = self._frame_pad(a)
             pos = lay.get(key) or (im.get("pos") if isinstance(im.get("pos"), (list, tuple)) else None)
             if pos is None:
                 hit = None
                 for f in (1.0, 0.9, 0.8, 0.7, 0.6, 0.5):
-                    hit = fs.find(w * f, h * f, corner_score(im.get("prefer", "auto")))
+                    hit = fs.find(w * f + 2 * px, h * f + 2 * py, corner_score(im.get("prefer", "auto")))
                     if hit:
                         if f < 1:
                             log("  " + T("image_shrunk", key=key, f=f))
                         w, h = w * f, h * f
                         break
-                pos = hit or find(key, w, h, corner_score(im.get("prefer", "auto"))) or (0.5, 0.5)
+                hit = hit or find(key, w + 2 * px, h + 2 * py, corner_score(im.get("prefer", "auto")))
+                pos = (hit[0] + px, hit[1] + py) if hit else (0.5, 0.5)
             else:
                 if len(pos) == 4:
                     # nur die Breite übernehmen; die Höhe folgt immer aus dem Seitenverhältnis des Bildes
@@ -1125,7 +1297,7 @@ class Figure:
                     h = w * ratio
                 pos = pos[:2]
             self._set_axes_af(a, pos[0], pos[1], w, h)
-            fs.block_rect(pos[0], pos[1], w, h)
+            fs.block_rect(pos[0] - px, pos[1] - py, w + 2 * px, h + 2 * py)
 
         for k in warn_over:
             log("  " + T("no_space", key=k))
@@ -1147,6 +1319,9 @@ class Figure:
     def check_overlaps(self):
         rend = self._renderer()
         boxes = {k: a.get_tightbbox(rend) for k, a in self.axes_items.items()}
+        for k, a in self.axes_items.items():
+            if getattr(a, "_frame", None) is not None:
+                boxes[k] = a._frame.get_window_extent(rend)
         boxes.update({k: a.get_window_extent(rend) for k, a in self.ann_items.items()})
         keys = list(boxes)
         bad = []

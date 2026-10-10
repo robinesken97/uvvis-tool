@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 APP_NAME = "UVVisTool"
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.3.0"
 
 if "--selftest" in sys.argv:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -31,8 +31,9 @@ from PySide6.QtCore import QSettings, Qt, QThread, QTimer, Signal  # noqa: E402
 from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QDesktopServices, QIcon, QImage,  # noqa: E402
                            QKeySequence, QPixmap)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,  # noqa: E402
-                               QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QColorDialog, QComboBox,  # noqa: E402
+                               QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
+                               QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
                                QPlainTextEdit, QProgressDialog, QPushButton, QScrollArea,
                                QSpinBox, QSplitter, QTableWidget, QTableWidgetItem,
@@ -219,6 +220,92 @@ class ConcDialog(QDialog):
         return out
 
 
+class TextFormatDialog(QDialog):
+    """Schriften, Labelstil und Rahmen – gilt für alle Tabs (Menü Format)."""
+
+    def __init__(self, parent, tf):
+        super().__init__(parent)
+        self.setWindowTitle(T("tf_title"))
+        tf = dict(core.TEXT_DEFAULTS, **(tf or {}))
+        lay = QVBoxLayout(self)
+
+        g = QGroupBox(T("tf_grp_fonts"))
+        f = QFormLayout(g)
+        self.cmb_font, self.cmb_sym = QFontComboBox(), QFontComboBox()
+        self.cmb_font.setCurrentText(tf["font"])
+        self.cmb_sym.setCurrentText(tf["symbol_font"])
+        f.addRow(T("tf_font"), self.cmb_font)
+        f.addRow(T("tf_symbol_font"), self.cmb_sym)
+        self.cb_greek = QCheckBox(T("tf_greek"), checked=tf["greek"])
+        self.cb_greek.toggled.connect(self.cmb_sym.setEnabled)
+        self.cmb_sym.setEnabled(tf["greek"])
+        f.addRow(self.cb_greek)
+        lay.addWidget(g)
+
+        g = QGroupBox(T("tf_grp_labels"))
+        f = QFormLayout(g)
+        self.sp_size = QDoubleSpinBox(decimals=1, minimum=0, maximum=40, singleStep=0.5, suffix=" pt")
+        self.sp_size.setSpecialValueText(T("tf_auto"))
+        self.sp_size.setValue(tf["label_pt"] or 0)
+        f.addRow(T("tf_label_size"), self.sp_size)
+        row = QHBoxLayout()
+        self.cb_bold = QCheckBox(T("tf_bold"), checked=tf["bold"])
+        self.cb_italic = QCheckBox(T("tf_italic"), checked=tf["italic"])
+        row.addWidget(self.cb_bold)
+        row.addWidget(self.cb_italic)
+        row.addStretch(1)
+        f.addRow("", row)
+        self.color = tf["color"]
+        self.btn_color = QPushButton()
+        self.btn_color.clicked.connect(self.pick_color)
+        self._show_color()
+        f.addRow(T("tf_color"), self.btn_color)
+        lay.addWidget(g)
+
+        g = QGroupBox(T("tf_grp_frames"))
+        v = QVBoxLayout(g)
+        self.cb_axes = QCheckBox(T("tf_axes_frame"), checked=tf["axes_frame"])
+        self.cb_struct = QCheckBox(T("tf_struct_frame"), checked=tf["struct_frame"])
+        v.addWidget(self.cb_axes)
+        v.addWidget(self.cb_struct)
+        lay.addWidget(g)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel | QDialogButtonBox.RestoreDefaults)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        bb.button(QDialogButtonBox.RestoreDefaults).clicked.connect(self.restore_defaults)
+        lay.addWidget(bb)
+
+    def _show_color(self):
+        self.btn_color.setText(self.color)
+        self.btn_color.setStyleSheet(f"QPushButton {{ color: {self.color}; font-weight: bold; }}")
+
+    def pick_color(self):
+        c = QColorDialog.getColor(QColor(self.color), self, T("tf_color"))
+        if c.isValid():
+            self.color = c.name()
+            self._show_color()
+
+    def restore_defaults(self):
+        d = core.TEXT_DEFAULTS
+        self.cmb_font.setCurrentText(d["font"])
+        self.cmb_sym.setCurrentText(d["symbol_font"])
+        self.cb_greek.setChecked(d["greek"])
+        self.sp_size.setValue(d["label_pt"])
+        self.cb_bold.setChecked(d["bold"])
+        self.cb_italic.setChecked(d["italic"])
+        self.color = d["color"]
+        self._show_color()
+        self.cb_axes.setChecked(d["axes_frame"])
+        self.cb_struct.setChecked(d["struct_frame"])
+
+    def result_format(self):
+        return {"font": self.cmb_font.currentFont().family(), "symbol_font": self.cmb_sym.currentFont().family(),
+                "greek": self.cb_greek.isChecked(), "label_pt": self.sp_size.value(),
+                "bold": self.cb_bold.isChecked(), "italic": self.cb_italic.isChecked(), "color": self.color,
+                "axes_frame": self.cb_axes.isChecked(), "struct_frame": self.cb_struct.isChecked()}
+
+
 class MainWindow(QMainWindow):
     log_signal = Signal(str)
 
@@ -238,6 +325,7 @@ class MainWindow(QMainWindow):
         self.glob = dict(DEFAULT_GLOB)
         self.extra_cache = {}
         self.ov_state, self.fl_state = {}, {}           # Programm startet immer leer
+        self.text_fmt = dict(core.TEXT_DEFAULTS)
         self._tab_index = 0
         self.project_dir = None
         self._undo, self._redo = [], []
@@ -296,6 +384,8 @@ class MainWindow(QMainWindow):
         me.addAction(self.act_undo)
         me.addAction(self.act_redo)
         self._update_undo_actions()
+        mf = mb.addMenu(T("menu_format"))
+        mf.addAction(QAction(T("act_text_format"), self, triggered=self.edit_text_format))
         ml = mb.addMenu(T("menu_lang"))
         grp = QActionGroup(self)
         for code, name in (("de", "Deutsch"), ("en", "English")):
@@ -777,7 +867,8 @@ class MainWindow(QMainWindow):
         return {"eps": {"files": list(self.csv_paths), "glob": dict(self.glob), "conc": self.conc,
                         "series": {g: {k: st.get(k) for k in keys} for g, st in self.series.items()},
                         "current": self.current},
-                "overlay": self.ov_state, "fluo": self.fl_state, "tab": self._tab_index}
+                "overlay": self.ov_state, "fluo": self.fl_state, "tab": self._tab_index,
+                "text": dict(self.text_fmt)}
 
     def set_state(self, state):
         """Zustand übernehmen (Projekt laden, Undo/Redo)."""
@@ -793,6 +884,7 @@ class MainWindow(QMainWindow):
         self.ov_state.update(state.get("overlay") or {})
         self.fl_state.clear()
         self.fl_state.update(state.get("fluo") or {})
+        self.text_fmt = dict(core.TEXT_DEFAULTS, **(state.get("text") or {}))
         self._tab_index = state.get("tab", 0) or 0
         self.current = eps.get("current")
         self.build_ui()
@@ -1278,7 +1370,22 @@ class MainWindow(QMainWindow):
                          "prefer": "right",
                          "_asset": st["photo_asset"]})
         cfg["images"] = imgs
+        core.apply_text_format(cfg, self.text_fmt)
         return cfg
+
+    def edit_text_format(self):
+        dlg = TextFormatDialog(self, self.text_fmt)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self.text_fmt = dlg.result_format()
+        for key in ("font", "symbol_font"):
+            name = self.text_fmt[key]
+            if core.first_font([name], None) is None:
+                self.log_signal.emit("  " + T("tf_missing", name=name))
+        self.render()
+        self.ov_tab.render()
+        self.fl_tab.render()
+        self.push_undo()
 
     def render(self):
         if not self.current or self.current not in self.groups:
@@ -1791,6 +1898,32 @@ def selftest(outdir, with_isnet=False):
         wbk = load_workbook(rep)
         assert len(wbk.sheetnames) >= 3 and any("nm" in n for n in wbk.sheetnames), wbk.sheetnames
         report.append("export into project + Excel report: OK")
+
+        # Textformat: λ/ε in Symbolschrift, Labels fett/farbig, Rahmen um Plot und Struktur
+        w.text_fmt = dict(core.TEXT_DEFAULTS, bold=True, color="#1764e8", label_pt=12.0,
+                          axes_frame=True, struct_frame=True)
+        w.render()
+        assert w.F.ax.spines["top"].get_visible(), "Rahmen oben fehlt"
+        ann = next(a for k, a in w.F.ann_items.items() if k.startswith("label_"))
+        assert "\\mathsf{λ}" in ann.get_text() and ann.get_fontweight() == "bold" and ann.get_fontsize() == 12.0
+        sa = w.F.axes_items["image_struktur"]
+        assert sa._frame is not None
+        rf = w.F._renderer()
+        fb, ib = sa._frame.get_window_extent(rf), sa.get_window_extent(rf)
+        assert fb.x0 < ib.x0 and fb.y1 > ib.y1, "Rahmen liegt nicht außen um die Struktur"
+        for k, b in [(k, a.get_window_extent(rf)) for k, a in w.F.ann_items.items()]:
+            assert not fb.overlaps(b), f"Strukturrahmen überdeckt {k}"
+        files = w.export_all(out / "textformat")
+        pdf = next(f for f in files if f.suffix == ".pdf")
+        fonts = " ".join(f[3] for f in pymupdf.open(str(pdf))[0].get_fonts())
+        sym_font = core.first_font(core.DEFAULTS["symbol_font"], "DejaVu Serif").replace(" ", "")
+        assert sym_font.lower() in fonts.lower().replace("-", ""), fonts
+        svg = next(f for f in files if f.suffix == ".svg").read_text(encoding="utf-8")
+        assert "structure_0" in svg, "SVG ohne Struktur"
+        w.fl_tab.export_to(out / "textformat_fluo")
+        w.text_fmt = dict(core.TEXT_DEFAULTS)
+        w.render()
+        report.append("text format + frames: OK")
 
         # Projekt automatisch gespeichert -> in neuem Fenster öffnen (Dateien als Kopie, Pfade relativ)
         w.ov_state["entries"][0]["file"] = w.import_file(w.ov_state["entries"][0]["file"], "data")
